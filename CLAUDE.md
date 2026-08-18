@@ -116,8 +116,24 @@ print differently, and `logparse` handles each; unparsable lines are still shown
 Test any parser change against the recorded samples in `tests/fixtures/log_*.txt`.
 
 ### `server.properties`
-The editor preserves comments, key order and unknown keys. Rewriting the file from a typed
-struct alone is not acceptable.
+It is a **Java properties file**, not `key=value` lines: `:` separates too, whitespace can
+separate, backslashes escape, `\uXXXX` encodes any character, and a trailing backslash
+continues onto the next line. `config::properties` keeps every physical line as it was read,
+so an untouched file round-trips byte for byte and comments, ordering and the keys plugins
+invent all survive. Only the edited line is rewritten. Writes are atomic, and the file as it
+was before this app first touched it is kept once as `server.properties.orig`.
+
+Encoding is UTF-8 both ways (Minecraft reads and writes UTF-8), with a Latin-1 fallback for
+files from older servers; escaped `\uXXXX` input is decoded on read. A non-ASCII MOTD has to
+survive read, edit, write *and* the server rewriting the file on boot — there is a live test
+for exactly that.
+
+### Worlds
+A world is any folder holding a `level.dat`; its metadata comes from the NBT, gzipped or not.
+Sizing walks every region file, so it runs in `spawn_blocking` behind a task id with progress
+and cancellation, never on the runtime. Switching worlds rewrites `level-name` and is refused
+while the server runs, as is deleting. Zip entry paths are sanitised on import: an archive
+naming `../../etc/passwd` must never write outside the instance folder.
 
 ### Backups of a running server
 `save-off` → `save-all flush` → wait for the save confirmation → archive → `save-on`, and

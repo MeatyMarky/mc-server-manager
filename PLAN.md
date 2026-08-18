@@ -288,7 +288,7 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
   command input with history.
 - Tests: log parser over captured vanilla/paper/fabric/forge log fixtures, both line endings.
 
-### Phase 4 — `server.properties`, players, worlds
+### Phase 4 — `server.properties`, players, worlds  ✅
 - Properties reader/writer that **preserves comments, ordering and unknown keys**; typed schema
   (bool/int/enum/string/range) with descriptions and search in the UI; cross-instance
   port-conflict warning.

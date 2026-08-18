@@ -430,3 +430,135 @@ view-distance=4
     );
     println!("captured {} console lines", buffer.total_seen());
 }
+
+/// The encoding question, answered by the server itself: write a MOTD with
+/// non-ASCII characters, start Paper, let it rewrite `server.properties` on
+/// boot, and check the value came back intact.
+#[tokio::test]
+#[ignore = "downloads Paper and runs a real server"]
+async fn a_non_ascii_motd_survives_a_real_server_start() {
+    use std::collections::BTreeMap;
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    use mc_server_manager_lib::config::{self, PropertiesUpdate};
+    use mc_server_manager_lib::logparse::{self, LogEvent};
+    use mc_server_manager_lib::process::launch;
+
+    const MOTD: &str = "Čajovna — žíznivý šnek";
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let state = state_in(&root).await;
+    mc_server_manager_lib::java::rescan(&state.db).await.unwrap();
+
+    let inst = instance_in(&state, &root, "props", ServerType::Paper, "1.21.4").await;
+    let cancel = CancellationToken::new();
+    install::install(&state, &state.http, &inst, "1.21.4", None, &cancel, |_, _, _, _| {})
+        .await
+        .expect("install paper");
+    mc_server_manager_lib::instance::eula::set(&state, inst.id, true)
+        .await
+        .unwrap();
+
+    // A first run to make the server write its own server.properties.
+    run_until_ready(&state, inst.id, Some(25602)).await;
+
+    // Now edit it the way the UI does, and record what the file looked like.
+    let before = std::fs::read_to_string(inst.path_buf().join("server.properties")).unwrap();
+    let report = config::save(
+        &state,
+        inst.id,
+        PropertiesUpdate {
+            changes: BTreeMap::from([("motd".to_string(), MOTD.to_string())]),
+        },
+    )
+    .await
+    .expect("save properties");
+    assert_eq!(report.changed, vec!["motd"]);
+    assert!(report.backup_created, "the original file was kept");
+
+    // Everything except the motd line is untouched.
+    let after = std::fs::read_to_string(inst.path_buf().join("server.properties")).unwrap();
+    let changed_lines: Vec<&str> = after
+        .lines()
+        .filter(|line| !before.lines().any(|old| old == *line))
+        .collect();
+    assert_eq!(changed_lines.len(), 1, "only one line changed: {changed_lines:?}");
+    assert!(changed_lines[0].contains(MOTD));
+
+    // The server reads and rewrites the file on boot: if the encoding were
+    // wrong, this is where the MOTD would come back mangled.
+    run_until_ready(&state, inst.id, None).await;
+
+    let rewritten = config::read(&inst.path_buf()).await.unwrap();
+    assert_eq!(
+        rewritten.get("motd"),
+        Some(MOTD),
+        "the server preserved the MOTD it read from our file"
+    );
+
+    let bytes = std::fs::read(inst.path_buf().join("server.properties")).unwrap();
+    assert!(
+        std::str::from_utf8(&bytes).is_ok(),
+        "the server wrote it back as UTF-8, matching how we wrote it"
+    );
+    println!("motd survived a real server start: {MOTD}");
+
+    /// Starts the server, waits for "Done", then stops it cleanly.
+    async fn run_until_ready(
+        state: &AppState,
+        id: i64,
+        port: Option<u16>,
+    ) {
+        let row = instance::get(&state.db, id).await.unwrap();
+        if let Some(port) = port {
+            std::fs::write(
+                row.path_buf().join("server.properties"),
+                format!("server-port={port}\nmax-players=1\nonline-mode=false\nview-distance=4\n"),
+            )
+            .unwrap();
+        }
+
+        let java = mc_server_manager_lib::java::best_for(&state.db, 21)
+            .await
+            .unwrap()
+            .expect("a Java 21+ runtime");
+        let plan = launch::plan(&row, std::path::Path::new(&java.path)).unwrap();
+
+        let mut child = tokio::process::Command::new(&plan.program)
+            .args(&plan.args)
+            .current_dir(&plan.working_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+
+        let mut stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(240);
+        while tokio::time::Instant::now() < deadline {
+            let Ok(Ok(Some(raw))) =
+                tokio::time::timeout(std::time::Duration::from_secs(60), lines.next_line()).await
+            else {
+                break;
+            };
+            let (_, _, _, message) = logparse::parse_line(&raw, false);
+            if matches!(logparse::detect_event(&message), Some(LogEvent::Ready { .. })) {
+                break;
+            }
+        }
+
+        stdin.write_all(b"stop\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        while let Ok(Some(_)) = lines.next_line().await {}
+        let status = tokio::time::timeout(std::time::Duration::from_secs(90), child.wait())
+            .await
+            .expect("the server exited")
+            .unwrap();
+        assert_eq!(status.code(), Some(0), "the server stopped cleanly");
+    }
+}

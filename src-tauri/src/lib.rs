@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod config;
 pub mod db;
 pub mod error;
 pub mod download;
@@ -11,9 +12,11 @@ pub mod mcversion;
 pub mod providers;
 pub mod metrics;
 pub mod paths;
+pub mod players;
 pub mod process;
 pub mod state;
 pub mod tasks;
+pub mod worlds;
 
 use std::path::PathBuf;
 
@@ -116,6 +119,18 @@ pub fn run() {
             commands::process::console_tail,
             commands::process::command_history,
             commands::process::port_status,
+            commands::config::properties_read,
+            commands::config::properties_write,
+            commands::config::properties_schema,
+            commands::players::players_read,
+            commands::players::players_mutate,
+            commands::players::players_resolve_uuid,
+            commands::worlds::worlds_list,
+            commands::worlds::world_measure,
+            commands::worlds::world_switch,
+            commands::worlds::world_delete,
+            commands::worlds::world_export,
+            commands::worlds::world_import,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

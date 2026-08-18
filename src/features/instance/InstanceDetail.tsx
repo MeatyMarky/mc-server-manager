@@ -19,7 +19,10 @@ import { StatusDot } from "@/features/instances/InstanceSidebar";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { SERVER_TYPE_LABEL, STATUS_LABEL } from "@/lib/status";
 import type { InstanceView } from "@/lib/types";
+import { ConfigTab } from "@/features/config/ConfigTab";
 import { ConsoleTab } from "@/features/console/ConsoleTab";
+import { PlayersTab } from "@/features/players/PlayersTab";
+import { WorldsTab } from "@/features/worlds/WorldsTab";
 import { RunControls } from "@/features/console/RunControls";
 import { CloneDialog, DeleteDialog, LocateBanner, RenameDialog } from "./dialogs";
 import { PlaceholderTab } from "./tabs/PlaceholderTab";
@@ -130,26 +133,38 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
             description="Modrinth search filtered by loader and version, one-click install with dependency resolution, and local jar drag-and-drop."
           />
         </TabsContent>
-        <TabsContent value="config">
-          <PlaceholderTab
-            title="Config"
-            phase={4}
-            description="A typed server.properties editor that preserves comments, ordering and unknown keys."
-          />
+        <TabsContent value="config" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title="Config"
+              phase={4}
+              description="Locate the instance folder to edit its configuration."
+            />
+          ) : (
+            <ConfigTab instance={instance} />
+          )}
         </TabsContent>
-        <TabsContent value="players">
-          <PlaceholderTab
-            title="Players"
-            phase={4}
-            description="Ops, whitelist and bans. While the server runs these go through stdin commands, because a running server rewrites the JSON files on shutdown."
-          />
+        <TabsContent value="players" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title="Players"
+              phase={4}
+              description="Locate the instance folder to manage its players."
+            />
+          ) : (
+            <PlayersTab instance={instance} />
+          )}
         </TabsContent>
-        <TabsContent value="worlds">
-          <PlaceholderTab
-            title="Worlds"
-            phase={4}
-            description="List, switch, delete, and import or export worlds as zip archives."
-          />
+        <TabsContent value="worlds" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title="Worlds"
+              phase={4}
+              description="Locate the instance folder to manage its worlds."
+            />
+          ) : (
+            <WorldsTab instance={instance} />
+          )}
         </TabsContent>
         <TabsContent value="backups">
           <PlaceholderTab

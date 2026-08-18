@@ -9,8 +9,16 @@ import type {
   EulaStatus,
   JavaRuntime,
   JavaStatus,
+  KeyInfo,
+  Mutation,
+  MutationReport,
   ParsedLine,
+  PlayerLists,
+  PropertiesUpdate,
+  PropertiesView,
+  SaveReport,
   StopStage,
+  World,
   ServerType,
   VersionEntry,
   CloneInstanceInput,
@@ -108,4 +116,31 @@ export const ipc = {
   commandHistory: (id: number) => invoke<string[]>("command_history", { id }),
   /** null when the port is free; otherwise a sentence naming the conflict. */
   portStatus: (id: number) => invoke<string | null>("port_status", { id }),
+
+  // Phase 4: configuration, players, worlds.
+  propertiesRead: (id: number) => invoke<PropertiesView>("properties_read", { id }),
+  propertiesWrite: (id: number, input: PropertiesUpdate) =>
+    invoke<SaveReport>("properties_write", { id, input }),
+  propertiesSchema: () => invoke<KeyInfo[]>("properties_schema"),
+
+  playersRead: (id: number) => invoke<PlayerLists>("players_read", { id }),
+  /** Every op/whitelist/ban change goes through this one command. */
+  playersMutate: (id: number, mutation: Mutation) =>
+    invoke<MutationReport>("players_mutate", { id, mutation }),
+  /** Returns [uuid, fromMojang]; false means the offline UUID was derived. */
+  playersResolveUuid: (name: string) =>
+    invoke<[string, boolean]>("players_resolve_uuid", { name }),
+
+  worldsList: (id: number) => invoke<World[]>("worlds_list", { id }),
+  /** Returns a task id; the size arrives on task://done. */
+  worldMeasure: (id: number, folder: string) =>
+    invoke<string>("world_measure", { id, folder }),
+  worldSwitch: (id: number, folder: string) =>
+    invoke<void>("world_switch", { id, folder }),
+  worldDelete: (id: number, folder: string) =>
+    invoke<void>("world_delete", { id, folder }),
+  worldExport: (id: number, folder: string, target: string) =>
+    invoke<string>("world_export", { id, folder, target }),
+  worldImport: (id: number, archive: string, folder: string | null) =>
+    invoke<string>("world_import", { id, archive, folder }),
 };
