@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
 use crate::http::Fetch;
-use crate::mcversion;
+use crate::mcversion::{IndexedVersion, VersionIndex};
 
 use super::{Artifact, ArtifactKind, BuildEntry, VersionEntry};
 
@@ -26,6 +26,8 @@ struct ManifestVersion {
     #[serde(rename = "type")]
     kind: String,
     url: String,
+    #[serde(rename = "releaseTime")]
+    release_time: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +53,23 @@ struct Download {
     sha1: String,
     size: u64,
     url: String,
+}
+
+/// The whole manifest as chronology entries. Manifest order is newest first,
+/// and that order plus `releaseTime` is what every version sort relies on.
+pub fn parse_manifest_entries(body: &str) -> AppResult<Vec<IndexedVersion>> {
+    let manifest: Manifest = serde_json::from_str(body)?;
+    Ok(manifest
+        .versions
+        .into_iter()
+        .enumerate()
+        .map(|(position, version)| IndexedVersion {
+            id: version.id,
+            release_time: version.release_time,
+            kind: version.kind,
+            position: position as i64,
+        })
+        .collect())
 }
 
 /// Releases only — snapshots are excluded from the picker, but a snapshot id
@@ -103,13 +122,13 @@ pub fn parse_version_detail(body: &str, mc_version: &str) -> AppResult<Artifact>
     })
 }
 
-pub async fn list_versions<F: Fetch>(fetch: &F) -> AppResult<Vec<VersionEntry>> {
+pub async fn list_versions<F: Fetch>(
+    fetch: &F,
+    index: &VersionIndex,
+) -> AppResult<Vec<VersionEntry>> {
     let body = fetch.get_text(MANIFEST_URL).await?;
-    let mut versions = parse_manifest(&body)?;
-    let mut ids: Vec<String> = versions.iter().map(|v| v.id.clone()).collect();
-    mcversion::sort_newest_first(&mut ids);
-    versions.sort_by_key(|v| ids.iter().position(|id| id == &v.id).unwrap_or(usize::MAX));
-    Ok(versions)
+    let versions = parse_manifest(&body)?;
+    Ok(super::sort_entries(versions, index))
 }
 
 pub async fn list_builds<F: Fetch>(_fetch: &F, _mc_version: &str) -> AppResult<Vec<BuildEntry>> {
@@ -203,9 +222,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn versions_come_back_newest_first() {
-        let versions = list_versions(&fixtures()).await.unwrap();
+    async fn versions_come_back_in_release_order() {
+        let index = index_from_fixture();
+        let versions = list_versions(&fixtures(), &index).await.unwrap();
         assert_eq!(versions.first().map(|v| v.id.as_str()), Some("26.2"));
         assert_eq!(versions.last().map(|v| v.id.as_str()), Some("1.12.2"));
+    }
+
+    #[test]
+    fn manifest_entries_carry_release_times_in_manifest_order() {
+        let body = manifest_body();
+        let entries = parse_manifest_entries(&body).unwrap();
+        assert_eq!(entries.first().map(|e| e.position), Some(0));
+        assert!(entries.iter().all(|e| e.release_time.contains('T')));
+        // Manifest order is newest first, so later entries are older.
+        let first = &entries[0];
+        let last = entries.last().unwrap();
+        assert!(first.release_time > last.release_time);
+    }
+
+    fn manifest_body() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/vanilla_version_manifest_v2.json"),
+        )
+        .unwrap()
+    }
+
+    fn index_from_fixture() -> VersionIndex {
+        VersionIndex::from_entries(parse_manifest_entries(&manifest_body()).unwrap())
     }
 }

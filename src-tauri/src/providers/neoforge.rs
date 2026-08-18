@@ -10,7 +10,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::http::Fetch;
-use crate::mcversion;
+use crate::mcversion::VersionIndex;
 
 use super::{parse_maven_versions, Artifact, ArtifactKind, BuildEntry, VersionEntry};
 
@@ -56,7 +56,8 @@ pub fn is_stable(neoforge_version: &str) -> bool {
     !neoforge_version.contains("-beta") && !neoforge_version.contains("-alpha")
 }
 
-/// Distinct Minecraft versions covered by the published loaders, newest first.
+/// Distinct Minecraft versions covered by the published loaders. Ordering is
+/// applied by the caller with the release chronology.
 pub fn versions_from_metadata(xml: &str) -> Vec<VersionEntry> {
     let mut seen: Vec<String> = Vec::new();
     for version in parse_maven_versions(xml) {
@@ -66,7 +67,6 @@ pub fn versions_from_metadata(xml: &str) -> Vec<VersionEntry> {
             }
         }
     }
-    mcversion::sort_newest_first(&mut seen);
     seen.into_iter()
         .map(|id| VersionEntry { id, stable: true })
         .collect()
@@ -87,8 +87,12 @@ pub fn builds_from_metadata(xml: &str, mc_version: &str) -> Vec<BuildEntry> {
     builds
 }
 
-pub async fn list_versions<F: Fetch>(fetch: &F) -> AppResult<Vec<VersionEntry>> {
-    Ok(versions_from_metadata(&fetch.get_text(&metadata_url()).await?))
+pub async fn list_versions<F: Fetch>(
+    fetch: &F,
+    index: &VersionIndex,
+) -> AppResult<Vec<VersionEntry>> {
+    let versions = versions_from_metadata(&fetch.get_text(&metadata_url()).await?);
+    Ok(super::sort_entries(versions, index))
 }
 
 pub async fn list_builds<F: Fetch>(fetch: &F, mc_version: &str) -> AppResult<Vec<BuildEntry>> {
@@ -171,9 +175,20 @@ mod tests {
         assert!(!is_stable("26.2.0.1-beta"));
     }
 
+    fn index() -> VersionIndex {
+        let body = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/vanilla_version_manifest_v2.json"),
+        )
+        .unwrap();
+        VersionIndex::from_entries(
+            crate::providers::vanilla::parse_manifest_entries(&body).unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn versions_cover_both_eras_newest_first() {
-        let versions = list_versions(&fixtures()).await.unwrap();
+        let versions = list_versions(&fixtures(), &index()).await.unwrap();
         let ids: Vec<&str> = versions.iter().map(|v| v.id.as_str()).collect();
         assert_eq!(ids.first(), Some(&"26.2"));
         assert!(ids.contains(&"1.20.4") || ids.contains(&"1.21.1"));

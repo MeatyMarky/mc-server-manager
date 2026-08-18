@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
 use crate::http::Fetch;
-use crate::mcversion;
+use crate::mcversion::{self, VersionIndex};
 
 use super::{parse_maven_versions, Artifact, ArtifactKind, BuildEntry, VersionEntry};
 
@@ -61,7 +61,8 @@ pub fn parse_promotions(body: &str) -> AppResult<Vec<Promotion>> {
     Ok(out)
 }
 
-/// Minecraft versions Forge publishes for, newest first.
+/// Minecraft versions Forge publishes for. Ordering is applied by the caller
+/// with the release chronology.
 pub fn versions_from_promotions(body: &str) -> AppResult<Vec<VersionEntry>> {
     let promotions = parse_promotions(body)?;
     let mut ids: Vec<String> = Vec::new();
@@ -70,7 +71,6 @@ pub fn versions_from_promotions(body: &str) -> AppResult<Vec<VersionEntry>> {
             ids.push(promotion.mc_version);
         }
     }
-    mcversion::sort_newest_first(&mut ids);
     Ok(ids
         .into_iter()
         .map(|id| VersionEntry { id, stable: true })
@@ -99,8 +99,12 @@ pub fn builds_for(xml: &str, promotions: &[Promotion], mc_version: &str) -> Vec<
     builds
 }
 
-pub async fn list_versions<F: Fetch>(fetch: &F) -> AppResult<Vec<VersionEntry>> {
-    versions_from_promotions(&fetch.get_text(PROMOTIONS_URL).await?)
+pub async fn list_versions<F: Fetch>(
+    fetch: &F,
+    index: &VersionIndex,
+) -> AppResult<Vec<VersionEntry>> {
+    let versions = versions_from_promotions(&fetch.get_text(PROMOTIONS_URL).await?)?;
+    Ok(super::sort_entries(versions, index))
 }
 
 pub async fn list_builds<F: Fetch>(fetch: &F, mc_version: &str) -> AppResult<Vec<BuildEntry>> {
@@ -191,9 +195,20 @@ mod tests {
         assert!(promotions.iter().any(|p| p.mc_version == "26.2"));
     }
 
+    fn index() -> VersionIndex {
+        let body = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/vanilla_version_manifest_v2.json"),
+        )
+        .unwrap();
+        VersionIndex::from_entries(
+            crate::providers::vanilla::parse_manifest_entries(&body).unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn versions_are_newest_first_and_cover_the_calendar_era() {
-        let versions = list_versions(&fixtures()).await.unwrap();
+        let versions = list_versions(&fixtures(), &index()).await.unwrap();
         assert_eq!(versions.first().map(|v| v.id.as_str()), Some("26.2"));
     }
 
@@ -210,8 +225,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_bare_forge_version_is_accepted() {
-        let artifact = resolve(&fixtures(), "1.21.4", Some("54.1.5")).await.unwrap();
-        assert_eq!(artifact.build.as_deref(), Some("1.21.4-54.1.5"));
+        // Taken from the fixture rather than hardcoded: refreshing fixtures
+        // changes which builds exist, and that must not break this assertion.
+        let builds = list_builds(&fixtures(), "1.21.4").await.unwrap();
+        let coordinate = builds.first().expect("a 1.21.4 build in the fixture").id.clone();
+        let bare = coordinate.trim_start_matches("1.21.4-").to_string();
+
+        let artifact = resolve(&fixtures(), "1.21.4", Some(&bare)).await.unwrap();
+        assert_eq!(artifact.build.as_deref(), Some(coordinate.as_str()));
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@
 //! here rather than being re-invented per provider.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Era {
@@ -105,14 +106,99 @@ pub fn at_least(a: &str, b: &str) -> bool {
     }
 }
 
-/// Newest first. Unparseable entries drop to the end in their original order.
-pub fn sort_newest_first(versions: &mut [String]) {
+/// Newest first, using *only* the parsed components.
+///
+/// This is the fallback for versions Mojang's manifest does not know about.
+/// Anything user-visible sorts through [`VersionIndex`] instead, because release
+/// chronology is the real ordering and version strings only approximate it.
+pub fn sort_newest_first_by_components(versions: &mut [String]) {
     versions.sort_by(|a, b| match (parse(a), parse(b)) {
         (Some(x), Some(y)) => compare(&y, &x),
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => Ordering::Equal,
     });
+}
+
+/// One entry of Mojang's version manifest, as far as ordering cares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedVersion {
+    pub id: String,
+    /// RFC3339, fixed width, so string comparison is chronological.
+    pub release_time: String,
+    pub kind: String,
+    /// Position in the manifest; 0 is the newest entry.
+    pub position: i64,
+}
+
+/// Release chronology, straight from Mojang.
+///
+/// `1.21.11` released before `26.2`, and no amount of component parsing proves
+/// that — the two numbering schemes are not comparable. Every user-visible sort
+/// (version pickers, "is there a newer build", mod filtering) goes through here.
+/// Versions the manifest does not list (a Paper release candidate, a hand-typed
+/// snapshot) fall back to component ordering and always sort *after* anything
+/// the manifest does know, because an unknown id cannot be placed in time.
+#[derive(Debug, Clone, Default)]
+pub struct VersionIndex {
+    by_id: HashMap<String, IndexedVersion>,
+}
+
+impl VersionIndex {
+    pub fn from_entries(entries: impl IntoIterator<Item = IndexedVersion>) -> Self {
+        Self {
+            by_id: entries
+                .into_iter()
+                .map(|entry| (entry.id.clone(), entry))
+                .collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+
+    pub fn get(&self, id: &str) -> Option<&IndexedVersion> {
+        self.by_id.get(id)
+    }
+
+    pub fn release_time(&self, id: &str) -> Option<&str> {
+        self.by_id.get(id).map(|entry| entry.release_time.as_str())
+    }
+
+    /// True when `a` was released after `b`.
+    pub fn is_newer(&self, a: &str, b: &str) -> bool {
+        self.compare(a, b) == Ordering::Greater
+    }
+
+    /// Chronological ordering: `Greater` means "released later".
+    pub fn compare(&self, a: &str, b: &str) -> Ordering {
+        match (self.by_id.get(a), self.by_id.get(b)) {
+            (Some(x), Some(y)) => x
+                .release_time
+                .cmp(&y.release_time)
+                // Same timestamp: manifest position decides, 0 being newest.
+                .then_with(|| y.position.cmp(&x.position)),
+            // A version Mojang knows always outranks one it does not.
+            (Some(_), None) => Ordering::Greater,
+            (None, Some(_)) => Ordering::Less,
+            (None, None) => match (parse(a), parse(b)) {
+                (Some(x), Some(y)) => compare(&x, &y),
+                (Some(_), None) => Ordering::Greater,
+                (None, Some(_)) => Ordering::Less,
+                (None, None) => Ordering::Equal,
+            },
+        }
+    }
+
+    /// Newest release first.
+    pub fn sort_newest_first(&self, versions: &mut [String]) {
+        versions.sort_by(|a, b| self.compare(b, a));
+    }
 }
 
 #[cfg(test)]
@@ -175,15 +261,94 @@ mod tests {
     }
 
     #[test]
-    fn sorts_newest_first_across_eras() {
+    fn component_sorting_is_only_the_fallback() {
         let mut versions: Vec<String> = ["1.20.4", "26.2", "1.21.4", "26.1.2", "nonsense"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        sort_newest_first(&mut versions);
+        sort_newest_first_by_components(&mut versions);
         assert_eq!(
             versions,
             vec!["26.2", "26.1.2", "1.21.4", "1.20.4", "nonsense"]
         );
+    }
+
+    fn entry(id: &str, release_time: &str, position: i64) -> IndexedVersion {
+        IndexedVersion {
+            id: id.to_string(),
+            release_time: release_time.to_string(),
+            kind: "release".to_string(),
+            position,
+        }
+    }
+
+    /// Release timestamps in the shape Mojang publishes them, newest first.
+    fn index() -> VersionIndex {
+        VersionIndex::from_entries([
+            entry("26.2", "2026-08-04T10:00:00+00:00", 0),
+            entry("26.1.2", "2026-06-16T09:00:00+00:00", 1),
+            entry("26.1", "2026-05-27T11:00:00+00:00", 2),
+            entry("1.21.11", "2026-03-10T12:00:00+00:00", 3),
+            entry("1.21.4", "2024-12-03T10:12:57+00:00", 4),
+            entry("1.20.4", "2023-12-07T12:56:20+00:00", 5),
+        ])
+    }
+
+    #[test]
+    fn ordering_follows_release_chronology_not_the_version_string() {
+        let index = index();
+        // The point of the index: 26.2 is newer than 1.21.11 because Mojang
+        // released it later, not because 26 > 1.
+        assert!(index.is_newer("26.2", "1.21.11"));
+        assert!(index.is_newer("1.21.11", "1.21.4"));
+        assert!(!index.is_newer("1.21.4", "26.1"));
+    }
+
+    #[test]
+    fn index_sorting_puts_the_newest_release_first() {
+        let index = index();
+        let mut versions: Vec<String> = ["1.21.4", "26.1", "1.20.4", "26.2", "1.21.11"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        index.sort_newest_first(&mut versions);
+        assert_eq!(versions, vec!["26.2", "26.1", "1.21.11", "1.21.4", "1.20.4"]);
+    }
+
+    #[test]
+    fn unknown_versions_sort_after_known_ones_and_fall_back_to_components() {
+        let index = index();
+        let mut versions: Vec<String> = ["1.21.4", "9.9.9-custom", "26.2", "8.8.8-custom"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        index.sort_newest_first(&mut versions);
+        assert_eq!(&versions[..2], &["26.2".to_string(), "1.21.4".to_string()]);
+        // Between two unknowns, components still give a stable, sensible order.
+        assert_eq!(
+            &versions[2..],
+            &["9.9.9-custom".to_string(), "8.8.8-custom".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_empty_index_degrades_to_component_ordering() {
+        let index = VersionIndex::default();
+        assert!(index.is_empty());
+        let mut versions: Vec<String> = ["1.20.4", "26.2", "1.21.4"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        index.sort_newest_first(&mut versions);
+        assert_eq!(versions, vec!["26.2", "1.21.4", "1.20.4"]);
+    }
+
+    #[test]
+    fn a_shared_timestamp_falls_back_to_manifest_position() {
+        let index = VersionIndex::from_entries([
+            entry("a", "2026-01-01T00:00:00+00:00", 0),
+            entry("b", "2026-01-01T00:00:00+00:00", 1),
+        ]);
+        assert!(index.is_newer("a", "b"), "position 0 is the newer entry");
     }
 }

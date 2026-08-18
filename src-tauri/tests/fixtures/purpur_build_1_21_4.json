@@ -1,10 +1,10 @@
 {
- "project": "purpur",
- "version": "1.21.4",
- "build": "2416",
- "result": "SUCCESS",
- "timestamp": 1744500645780,
- "duration": 550905,
- "metadata": {},
- "md5": "e3832b46efa4a2a56d31bc7ce26df6f0"
+  "build": "2416",
+  "duration": 550905,
+  "md5": "e3832b46efa4a2a56d31bc7ce26df6f0",
+  "metadata": {},
+  "project": "purpur",
+  "result": "SUCCESS",
+  "timestamp": 1744500645780,
+  "version": "1.21.4"
 }

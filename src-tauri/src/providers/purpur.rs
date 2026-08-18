@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
 use crate::http::Fetch;
-use crate::mcversion;
+use crate::mcversion::{self, VersionIndex};
 
 use super::{Artifact, ArtifactKind, BuildEntry, VersionEntry};
 
@@ -54,7 +54,6 @@ pub fn parse_versions(body: &str) -> AppResult<Vec<VersionEntry>> {
     let root: Root = serde_json::from_str(body)?;
     let mut ids = root.versions;
     ids.retain(|id| mcversion::parse(id).is_some_and(|v| v.is_release()));
-    mcversion::sort_newest_first(&mut ids);
     Ok(ids
         .into_iter()
         .map(|id| VersionEntry { id, stable: true })
@@ -77,8 +76,12 @@ pub fn parse_builds(body: &str) -> AppResult<Vec<BuildEntry>> {
         .collect())
 }
 
-pub async fn list_versions<F: Fetch>(fetch: &F) -> AppResult<Vec<VersionEntry>> {
-    parse_versions(&fetch.get_text(ROOT_URL).await?)
+pub async fn list_versions<F: Fetch>(
+    fetch: &F,
+    index: &VersionIndex,
+) -> AppResult<Vec<VersionEntry>> {
+    let versions = parse_versions(&fetch.get_text(ROOT_URL).await?)?;
+    Ok(super::sort_entries(versions, index))
 }
 
 pub async fn list_builds<F: Fetch>(fetch: &F, mc_version: &str) -> AppResult<Vec<BuildEntry>> {
@@ -134,10 +137,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn versions_are_sorted_newest_first() {
-        let versions = list_versions(&fixtures()).await.unwrap();
+    async fn versions_are_sorted_by_release_chronology() {
+        let body = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/vanilla_version_manifest_v2.json"),
+        )
+        .unwrap();
+        let index = VersionIndex::from_entries(
+            crate::providers::vanilla::parse_manifest_entries(&body).unwrap(),
+        );
+        let versions = list_versions(&fixtures(), &index).await.unwrap();
         let ids: Vec<&str> = versions.iter().map(|v| v.id.as_str()).collect();
-        assert!(ids.windows(2).all(|w| mcversion::at_least(w[0], w[1])));
+        assert!(
+            ids.windows(2).all(|w| !index.is_newer(w[1], w[0])),
+            "not newest first: {ids:?}"
+        );
     }
 
     #[tokio::test]

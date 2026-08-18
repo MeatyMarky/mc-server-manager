@@ -16,7 +16,9 @@ pub async fn provider_versions(
     state: State<'_, AppState>,
     server_type: ServerType,
 ) -> AppResult<Vec<VersionEntry>> {
-    providers::list_versions(server_type, &state.http).await
+    // Release chronology first: it decides the order of everything below.
+    let index = providers::index::ensure_fresh(&state.db, &state.http).await?;
+    providers::list_versions(server_type, &state.http, &index).await
 }
 
 #[tauri::command]

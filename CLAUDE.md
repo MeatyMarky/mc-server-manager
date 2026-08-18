@@ -69,6 +69,14 @@ compares or sorts a version goes through `mcversion.rs` — a hardcoded "starts 
 is a bug. NeoForge encodes the target version in its own number and changed encoding with the
 era too (`21.1.65` is 1.21.1; `26.2.0.62` is 26.2).
 
+### Version *ordering* is release chronology, never string parsing
+The two numbering schemes are not comparable as numbers, so every user-visible sort —
+version pickers, "is there a newer build", mod filtering — goes through
+`mcversion::VersionIndex`, built from Mojang's manifest (`releaseTime` plus manifest
+position) and cached in `mc_version_index`. Component ordering
+(`sort_newest_first_by_components`) exists only as the fallback for ids the manifest does
+not list, and those always sort after ids it does.
+
 ### Java requirements come from Mojang, not from a table
 The per-version JSON at `piston-meta` states `javaVersion.majorVersion`, and that is what an
 install records. The table in `java/version.rs` is only the offline fallback (26.x needs
@@ -147,6 +155,17 @@ Do not hand-edit it.
 - Live-API checks live in `tests/network_smoke.rs` and are all `#[ignore]`. Run them by hand
   after touching providers, the downloader or the installer:
   `cargo test --test network_smoke -- --ignored --nocapture`.
+- **Stale fixtures are maintenance, not a break.** The recordings pin real builds that the
+  upstream APIs eventually retire. Re-record them with one command:
+
+  ```bash
+  cargo xtask refresh-fixtures
+  ```
+
+  Then review the diff and re-run `cargo test`. Tests must assert on *shapes and
+  relationships* (newest-first ordering, checksum length, URL construction), never on a
+  specific build number — a test that breaks purely because Paper shipped a new build is a
+  badly written test, so fix the test rather than pinning the fixture.
 - Priority coverage: **version resolution, jar URL building, log parsing**, plus
   `server.properties` round-tripping and path handling.
 - Path/OS-specific logic gets tests for both Windows and Linux shapes; parsers accept `\r\n`

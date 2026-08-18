@@ -6,6 +6,7 @@
 
 pub mod fabric;
 pub mod forge;
+pub mod index;
 pub mod neoforge;
 pub mod paper;
 pub mod purpur;
@@ -17,6 +18,7 @@ use ts_rs::TS;
 use crate::db::models::ServerType;
 use crate::error::AppResult;
 use crate::http::Fetch;
+use crate::mcversion::VersionIndex;
 
 /// What gets downloaded: either the server jar itself, or an installer that has
 /// to be run to produce a server.
@@ -68,18 +70,29 @@ pub struct BuildEntry {
     pub label: Option<String>,
 }
 
-/// Minecraft versions this server type offers, newest first.
+/// Sorts version entries by release chronology, newest first.
+pub fn sort_entries(mut entries: Vec<VersionEntry>, index: &VersionIndex) -> Vec<VersionEntry> {
+    entries.sort_by(|a, b| index.compare(&b.id, &a.id));
+    entries
+}
+
+/// Minecraft versions this server type offers, newest release first.
+///
+/// Ordering comes from `index` (Mojang's release chronology), never from
+/// parsing the version strings — the classic and calendar schemes are not
+/// comparable as numbers.
 pub async fn list_versions<F: Fetch>(
     server_type: ServerType,
     fetch: &F,
+    index: &VersionIndex,
 ) -> AppResult<Vec<VersionEntry>> {
     match server_type {
-        ServerType::Vanilla => vanilla::list_versions(fetch).await,
-        ServerType::Paper => paper::list_versions(fetch).await,
-        ServerType::Purpur => purpur::list_versions(fetch).await,
-        ServerType::Fabric => fabric::list_versions(fetch).await,
-        ServerType::Forge => forge::list_versions(fetch).await,
-        ServerType::NeoForge => neoforge::list_versions(fetch).await,
+        ServerType::Vanilla => vanilla::list_versions(fetch, index).await,
+        ServerType::Paper => paper::list_versions(fetch, index).await,
+        ServerType::Purpur => purpur::list_versions(fetch, index).await,
+        ServerType::Fabric => fabric::list_versions(fetch, index).await,
+        ServerType::Forge => forge::list_versions(fetch, index).await,
+        ServerType::NeoForge => neoforge::list_versions(fetch, index).await,
     }
 }
 

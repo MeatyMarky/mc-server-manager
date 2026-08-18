@@ -8,6 +8,7 @@ use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
 use crate::http::Fetch;
+use crate::mcversion::VersionIndex;
 
 use super::{Artifact, ArtifactKind, BuildEntry, VersionEntry};
 
@@ -74,9 +75,12 @@ fn newest_stable_installer(body: &str) -> AppResult<String> {
         .ok_or_else(|| AppError::Network("Fabric published no installer versions".into()))
 }
 
-pub async fn list_versions<F: Fetch>(fetch: &F) -> AppResult<Vec<VersionEntry>> {
-    // Fabric already returns game versions newest first.
-    parse_game_versions(&fetch.get_text(GAME_URL).await?)
+pub async fn list_versions<F: Fetch>(
+    fetch: &F,
+    index: &VersionIndex,
+) -> AppResult<Vec<VersionEntry>> {
+    let versions = parse_game_versions(&fetch.get_text(GAME_URL).await?)?;
+    Ok(super::sort_entries(versions, index))
 }
 
 pub async fn list_builds<F: Fetch>(fetch: &F, _mc_version: &str) -> AppResult<Vec<BuildEntry>> {
@@ -136,9 +140,20 @@ mod tests {
             .route(INSTALLER_URL, "fabric_installer.json")
     }
 
+    fn index() -> VersionIndex {
+        let body = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/vanilla_version_manifest_v2.json"),
+        )
+        .unwrap();
+        VersionIndex::from_entries(
+            crate::providers::vanilla::parse_manifest_entries(&body).unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn only_stable_game_versions_are_offered() {
-        let versions = list_versions(&fixtures()).await.unwrap();
+        let versions = list_versions(&fixtures(), &index()).await.unwrap();
         let ids: Vec<&str> = versions.iter().map(|v| v.id.as_str()).collect();
         assert!(ids.contains(&"26.2"));
         assert!(!ids.iter().any(|id| id.contains("snapshot")));

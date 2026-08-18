@@ -52,6 +52,11 @@ async fn instance_in(
 #[ignore = "hits the network"]
 async fn all_six_providers_resolve_live() {
     let http = Http::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_in(dir.path()).await;
+    // Release chronology from the live manifest drives every version sort.
+    let index = providers::index::refresh(&state.db, &http).await.unwrap();
+    assert!(!index.is_empty());
 
     for (server_type, mc_version) in [
         (ServerType::Vanilla, "1.21.4"),
@@ -61,10 +66,16 @@ async fn all_six_providers_resolve_live() {
         (ServerType::Forge, "1.21.4"),
         (ServerType::NeoForge, "1.21.4"),
     ] {
-        let versions = providers::list_versions(server_type, &http)
+        let versions = providers::list_versions(server_type, &http, &index)
             .await
             .unwrap_or_else(|e| panic!("{server_type:?} versions: {e}"));
         assert!(!versions.is_empty(), "{server_type:?} listed no versions");
+        let ids: Vec<&str> = versions.iter().map(|v| v.id.as_str()).collect();
+        assert!(
+            ids.windows(2).all(|w| !index.is_newer(w[1], w[0])),
+            "{server_type:?} versions are not in release order: {:?}",
+            &ids[..ids.len().min(8)]
+        );
 
         let artifact = providers::resolve(server_type, &http, mc_version, None)
             .await

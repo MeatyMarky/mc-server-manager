@@ -345,6 +345,16 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
 - Case sensitivity: never rely on case-insensitive filename matching.
 - Instance name → folder name is validated for reserved/invalid characters on both OSes.
 
+### Version ordering
+
+Sorting is never derived from the version string. `mcversion::VersionIndex` holds Mojang's
+release chronology (`releaseTime` + manifest position), cached in `mc_version_index` and
+refreshed at most every 6 h, and every version list is ordered through it. Ids the manifest
+does not know (Paper release candidates, hand-typed snapshots) fall back to component
+ordering and sort after everything it does know.
+
+Fixtures for the provider tests are re-recorded with `cargo xtask refresh-fixtures`.
+
 ## 6. Types across the boundary
 
 Rust DTOs derive `serde::Serialize` plus `ts-rs` (`#[ts(export)]`), so `src/lib/types.ts` is

@@ -1,26 +1,26 @@
 [
- {
-  "version": "26.3-snapshot-9",
-  "stable": false
- },
- {
-  "version": "26.2",
-  "stable": true
- },
- {
-  "version": "26.1.2",
-  "stable": true
- },
- {
-  "version": "1.21.4",
-  "stable": true
- },
- {
-  "version": "1.20.4",
-  "stable": true
- },
- {
-  "version": "1.16.5",
-  "stable": true
- }
+  {
+    "stable": false,
+    "version": "26.3-snapshot-9"
+  },
+  {
+    "stable": true,
+    "version": "26.2"
+  },
+  {
+    "stable": true,
+    "version": "26.1.2"
+  },
+  {
+    "stable": true,
+    "version": "1.21.4"
+  },
+  {
+    "stable": true,
+    "version": "1.20.4"
+  },
+  {
+    "stable": true,
+    "version": "1.16.5"
+  }
 ]

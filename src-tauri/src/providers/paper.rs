@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
 use crate::http::Fetch;
-use crate::mcversion;
+use crate::mcversion::{self, VersionIndex};
 
 use super::{Artifact, ArtifactKind, BuildEntry, VersionEntry};
 
@@ -46,7 +46,6 @@ pub fn parse_versions(body: &str) -> AppResult<Vec<VersionEntry>> {
     let project: Project = serde_json::from_str(body)?;
     let mut ids: Vec<String> = project.versions.into_values().flatten().collect();
     ids.retain(|id| mcversion::parse(id).is_some_and(|v| v.is_release()));
-    mcversion::sort_newest_first(&mut ids);
     Ok(ids
         .into_iter()
         .map(|id| VersionEntry { id, stable: true })
@@ -94,8 +93,12 @@ fn artifact_from_build(build: Build, mc_version: &str) -> AppResult<Artifact> {
     })
 }
 
-pub async fn list_versions<F: Fetch>(fetch: &F) -> AppResult<Vec<VersionEntry>> {
-    parse_versions(&fetch.get_text(PROJECT_URL).await?)
+pub async fn list_versions<F: Fetch>(
+    fetch: &F,
+    index: &VersionIndex,
+) -> AppResult<Vec<VersionEntry>> {
+    let versions = parse_versions(&fetch.get_text(PROJECT_URL).await?)?;
+    Ok(super::sort_entries(versions, index))
 }
 
 pub async fn list_builds<F: Fetch>(fetch: &F, mc_version: &str) -> AppResult<Vec<BuildEntry>> {
@@ -144,9 +147,20 @@ mod tests {
             .route(&builds_url("1.21.4"), "paper_builds_1_21_4.json")
     }
 
+    fn index() -> crate::mcversion::VersionIndex {
+        let body = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/vanilla_version_manifest_v2.json"),
+        )
+        .unwrap();
+        crate::mcversion::VersionIndex::from_entries(
+            crate::providers::vanilla::parse_manifest_entries(&body).unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn versions_are_releases_newest_first_across_eras() {
-        let versions = list_versions(&fixtures()).await.unwrap();
+        let versions = list_versions(&fixtures(), &index()).await.unwrap();
         let ids: Vec<&str> = versions.iter().map(|v| v.id.as_str()).collect();
         assert_eq!(ids.first(), Some(&"26.2"));
         assert!(ids.contains(&"1.21.4"));

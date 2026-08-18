@@ -2,6 +2,8 @@ node_modules/
 dist/
 .vite/
 src-tauri/target/
+xtask/target/
+target/
 src-tauri/gen/
 *.local
 .DS_Store
