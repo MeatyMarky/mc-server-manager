@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+/* Dark is the default; `light` on <html> switches. Tokens follow the shadcn
+   naming so the primitives in components/ui stay drop-in compatible. */
+@custom-variant dark (&:where(:not(.light) *, :not(.light)));
+
+:root {
+  --background: oklch(0.19 0.015 260);
+  --foreground: oklch(0.95 0.01 260);
+  --card: oklch(0.22 0.017 260);
+  --card-foreground: oklch(0.95 0.01 260);
+  --popover: oklch(0.21 0.017 260);
+  --popover-foreground: oklch(0.95 0.01 260);
+  --primary: oklch(0.72 0.16 145);
+  --primary-foreground: oklch(0.17 0.02 145);
+  --secondary: oklch(0.27 0.02 260);
+  --secondary-foreground: oklch(0.95 0.01 260);
+  --muted: oklch(0.26 0.018 260);
+  --muted-foreground: oklch(0.68 0.02 260);
+  --accent: oklch(0.3 0.025 260);
+  --accent-foreground: oklch(0.96 0.01 260);
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.98 0.01 25);
+  --border: oklch(0.31 0.02 260);
+  --input: oklch(0.31 0.02 260);
+  --ring: oklch(0.72 0.16 145);
+  --radius: 0.6rem;
+
+  --status-stopped: oklch(0.6 0.02 260);
+  --status-starting: oklch(0.78 0.15 85);
+  --status-running: oklch(0.72 0.16 145);
+  --status-stopping: oklch(0.78 0.15 85);
+  --status-crashed: oklch(0.62 0.2 25);
+  --status-unmanaged: oklch(0.7 0.14 250);
+  --status-missing: oklch(0.55 0.03 260);
+}
+
+.light {
+  --background: oklch(0.98 0.005 260);
+  --foreground: oklch(0.2 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.02 260);
+  --primary: oklch(0.55 0.15 145);
+  --primary-foreground: oklch(0.99 0.01 145);
+  --secondary: oklch(0.94 0.01 260);
+  --secondary-foreground: oklch(0.24 0.02 260);
+  --muted: oklch(0.95 0.008 260);
+  --muted-foreground: oklch(0.48 0.02 260);
+  --accent: oklch(0.93 0.012 260);
+  --accent-foreground: oklch(0.22 0.02 260);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.99 0.01 25);
+  --border: oklch(0.89 0.01 260);
+  --input: oklch(0.89 0.01 260);
+  --ring: oklch(0.55 0.15 145);
+
+  --status-stopped: oklch(0.6 0.02 260);
+  --status-starting: oklch(0.65 0.15 85);
+  --status-running: oklch(0.55 0.15 145);
+  --status-stopping: oklch(0.65 0.15 85);
+  --status-crashed: oklch(0.55 0.2 25);
+  --status-unmanaged: oklch(0.55 0.14 250);
+  --status-missing: oklch(0.7 0.02 260);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+/* Visible focus everywhere: the whole app has to be keyboard-navigable. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes content-in {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+[data-slot="dialog-overlay"][data-state="open"] {
+  animation: overlay-in 120ms ease-out;
+}
+
+[data-slot="dialog-content"][data-state="open"] {
+  animation: content-in 140ms ease-out;
+}

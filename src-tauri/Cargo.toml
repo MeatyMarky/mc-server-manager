@@ -1,0 +1,37 @@
+[package]
+name = "mc-server-manager"
+version = "0.1.0"
+description = "Cross-platform desktop manager for local Minecraft servers"
+edition = "2021"
+rust-version = "1.80"
+default-run = "mc-server-manager"
+
+[lib]
+name = "mc_server_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "mc-server-manager"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+dunce = "1.0.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-none", "sqlite", "migrate", "macros", "chrono"] }
+sysinfo = "0.36.1"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-opener = "2.5.4"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ts-rs = "12.0.1"
+uuid = { version = "1.20.0", features = ["v4"] }
+walkdir = "2.5.0"
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }

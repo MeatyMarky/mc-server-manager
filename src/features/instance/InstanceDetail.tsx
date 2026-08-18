@@ -1,0 +1,175 @@
+import { Copy, FolderOpen, MoreVertical, Pencil, Square, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import {
+  Badge,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/misc";
+import { StatusDot } from "@/features/instances/InstanceSidebar";
+import { useForceStopInstance } from "@/features/instances/queries";
+import { errorMessage, ipc } from "@/lib/ipc";
+import { SERVER_TYPE_LABEL, STATUS_LABEL } from "@/lib/status";
+import type { InstanceView } from "@/lib/types";
+import { CloneDialog, DeleteDialog, LocateBanner, RenameDialog } from "./dialogs";
+import { PlaceholderTab } from "./tabs/PlaceholderTab";
+import { SettingsTab } from "./tabs/SettingsTab";
+
+const TABS = [
+  { value: "console", label: "Console" },
+  { value: "mods", label: "Mods" },
+  { value: "config", label: "Config" },
+  { value: "players", label: "Players" },
+  { value: "worlds", label: "Worlds" },
+  { value: "backups", label: "Backups" },
+  { value: "settings", label: "Settings" },
+] as const;
+
+export function InstanceDetail({ instance }: { instance: InstanceView }) {
+  const [renaming, setRenaming] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const forceStop = useForceStopInstance();
+
+  const missing = instance.status === "missing";
+
+  return (
+    <section className="flex min-w-0 flex-1 flex-col p-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <StatusDot status={instance.status} />
+            <h2 className="truncate text-xl font-semibold">{instance.name}</h2>
+          </div>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge>{SERVER_TYPE_LABEL[instance.serverType]}</Badge>
+            <Badge>{instance.mcVersion}</Badge>
+            {instance.loaderVersion ? <Badge>build {instance.loaderVersion}</Badge> : null}
+            <span>{STATUS_LABEL[instance.status]}</span>
+            {instance.eulaAccepted ? null : <Badge>EULA not accepted</Badge>}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {instance.status === "unmanaged" ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={forceStop.isPending}
+              onClick={() => forceStop.mutate(instance.id)}
+            >
+              <Square /> Force stop
+            </Button>
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="Instance actions">
+                <MoreVertical />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setRenaming(true)}>
+                <Pencil /> Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={missing} onSelect={() => setCloning(true)}>
+                <Copy /> Clone
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={missing}
+                onSelect={() => {
+                  ipc.instanceOpenFolder(instance.id).catch((error) => {
+                    toast.error(errorMessage(error));
+                  });
+                }}
+              >
+                <FolderOpen /> Open folder
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() => setDeleting(true)}
+              >
+                <Trash2 /> Delete…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </header>
+
+      {missing ? (
+        <div className="mt-4">
+          <LocateBanner instance={instance} />
+        </div>
+      ) : null}
+
+      <Tabs defaultValue="console" className="mt-6 flex min-h-0 flex-1 flex-col">
+        <TabsList>
+          {TABS.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="console">
+          <PlaceholderTab
+            title="Console"
+            phase={3}
+            description="Live stdout and stderr, a command input with history, autoscroll, search and copy."
+          />
+        </TabsContent>
+        <TabsContent value="mods">
+          <PlaceholderTab
+            title={instance.contentDir === "plugins" ? "Plugins" : "Mods"}
+            phase={5}
+            description="Modrinth search filtered by loader and version, one-click install with dependency resolution, and local jar drag-and-drop."
+          />
+        </TabsContent>
+        <TabsContent value="config">
+          <PlaceholderTab
+            title="Config"
+            phase={4}
+            description="A typed server.properties editor that preserves comments, ordering and unknown keys."
+          />
+        </TabsContent>
+        <TabsContent value="players">
+          <PlaceholderTab
+            title="Players"
+            phase={4}
+            description="Ops, whitelist and bans. While the server runs these go through stdin commands, because a running server rewrites the JSON files on shutdown."
+          />
+        </TabsContent>
+        <TabsContent value="worlds">
+          <PlaceholderTab
+            title="Worlds"
+            phase={4}
+            description="List, switch, delete, and import or export worlds as zip archives."
+          />
+        </TabsContent>
+        <TabsContent value="backups">
+          <PlaceholderTab
+            title="Backups"
+            phase={6}
+            description="Manual and scheduled backups with retention, save-off during the copy, and a confirmed restore."
+          />
+        </TabsContent>
+        <TabsContent value="settings">
+          <SettingsTab instance={instance} />
+        </TabsContent>
+      </Tabs>
+
+      <RenameDialog instance={instance} open={renaming} onOpenChange={setRenaming} />
+      <CloneDialog instance={instance} open={cloning} onOpenChange={setCloning} />
+      <DeleteDialog instance={instance} open={deleting} onOpenChange={setDeleting} />
+    </section>
+  );
+}
