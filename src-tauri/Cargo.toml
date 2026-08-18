@@ -17,8 +17,14 @@ path = "src/main.rs"
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
 dunce = "1.0.5"
+futures-util = "0.3.34"
+hex = "0.4.3"
+md-5 = "0.10.6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2", "charset"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha1 = "0.10.7"
+sha2 = "0.10.9"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-none", "sqlite", "migrate", "macros", "chrono"] }
 sysinfo = "0.36.1"
 tauri = { version = "2.11.5", features = ["tray-icon"] }
@@ -26,6 +32,7 @@ tauri-plugin-dialog = "2.7.2"
 tauri-plugin-opener = "2.5.4"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["full"] }
+tokio-util = "0.7.19"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
@@ -35,3 +42,9 @@ walkdir = "2.5.0"
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

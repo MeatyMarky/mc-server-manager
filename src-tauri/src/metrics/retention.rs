@@ -76,6 +76,14 @@ pub async fn pruner_loop(pool: SqlitePool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+
+    /// A fixed, minute-aligned instant. Anchoring the tests here keeps the
+    /// minute buckets deterministic: seeding from `Utc::now()` straddles a
+    /// minute boundary depending on when the suite runs.
+    fn base() -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 3, 1, 12, 0, 0).single().expect("valid instant")
+    }
 
     async fn seed(pool: &SqlitePool) {
         let now = crate::db::now_rfc3339();
@@ -110,7 +118,7 @@ mod tests {
     async fn recent_samples_keep_full_resolution() {
         let pool = crate::db::connect_in_memory().await.unwrap();
         seed(&pool).await;
-        let now = Utc::now();
+        let now = base();
         for offset in 0..12 {
             insert_sample(&pool, now - Duration::seconds(offset * 5)).await;
         }
@@ -124,7 +132,7 @@ mod tests {
     async fn older_samples_collapse_to_one_per_minute() {
         let pool = crate::db::connect_in_memory().await.unwrap();
         seed(&pool).await;
-        let now = Utc::now();
+        let now = base();
         let old = now - Duration::hours(30);
         // Twelve samples inside one minute, plus one in the next minute.
         for offset in 0..12 {
@@ -141,7 +149,7 @@ mod tests {
     async fn samples_past_thirty_days_are_deleted() {
         let pool = crate::db::connect_in_memory().await.unwrap();
         seed(&pool).await;
-        let now = Utc::now();
+        let now = base();
         insert_sample(&pool, now - Duration::days(31)).await;
         insert_sample(&pool, now - Duration::days(29)).await;
         insert_sample(&pool, now).await;
@@ -155,7 +163,7 @@ mod tests {
     async fn pruning_is_idempotent() {
         let pool = crate::db::connect_in_memory().await.unwrap();
         seed(&pool).await;
-        let now = Utc::now();
+        let now = base();
         let old = now - Duration::hours(48);
         for offset in 0..6 {
             insert_sample(&pool, old + Duration::seconds(offset * 5)).await;
@@ -184,7 +192,7 @@ mod tests {
         .await
         .unwrap();
 
-        let then = Utc::now() - Duration::hours(48);
+        let then = base() - Duration::hours(48);
         for instance_id in [1, 2] {
             for offset in 0..4 {
                 sqlx::query(
@@ -198,7 +206,7 @@ mod tests {
             }
         }
 
-        prune(&pool, Utc::now()).await.unwrap();
+        prune(&pool, base()).await.unwrap();
         assert_eq!(count(&pool).await, 2, "one surviving row per instance");
     }
 }

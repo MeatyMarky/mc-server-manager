@@ -53,6 +53,36 @@ pub enum AppError {
     NotImplemented(&'static str),
 
     #[error("{0}")]
+    Network(String),
+
+    #[error("no {kind} build for Minecraft {version}")]
+    VersionNotFound { kind: &'static str, version: String },
+
+    #[error("{file} is corrupt: expected {algorithm} {expected}, got {actual}")]
+    ChecksumMismatch {
+        file: String,
+        algorithm: &'static str,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("cancelled")]
+    Cancelled,
+
+    /// Carries the installer log so the UI can show what the installer said
+    /// instead of a generic failure.
+    #[error("the {installer} installer failed (exit {exit_code})")]
+    InstallerFailed {
+        installer: &'static str,
+        exit_code: i32,
+        log_path: String,
+        log_tail: String,
+    },
+
+    #[error("no Java {required} or newer was found; install one or pin a JDK for this instance")]
+    JavaNotFound { required: i64 },
+
+    #[error("{0}")]
     Other(String),
 }
 
@@ -72,6 +102,12 @@ impl AppError {
             AppError::NotAServerFolder(_) => "not_a_server_folder",
             AppError::InstanceRunning(_) => "instance_running",
             AppError::NotImplemented(_) => "not_implemented",
+            AppError::Network(_) => "network",
+            AppError::VersionNotFound { .. } => "version_not_found",
+            AppError::ChecksumMismatch { .. } => "checksum_mismatch",
+            AppError::Cancelled => "cancelled",
+            AppError::InstallerFailed { .. } => "installer_failed",
+            AppError::JavaNotFound { .. } => "java_not_found",
             AppError::Other(_) => "other",
         }
     }
@@ -87,9 +123,21 @@ impl AppError {
 
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut s = serializer.serialize_struct("AppError", 2)?;
+        let mut s = serializer.serialize_struct("AppError", 3)?;
         s.serialize_field("kind", self.kind())?;
         s.serialize_field("message", &self.to_string())?;
+        match self {
+            AppError::InstallerFailed {
+                log_path, log_tail, ..
+            } => s.serialize_field(
+                "detail",
+                &serde_json::json!({ "logPath": log_path, "logTail": log_tail }),
+            )?,
+            AppError::JavaNotFound { required } => {
+                s.serialize_field("detail", &serde_json::json!({ "required": required }))?
+            }
+            _ => s.serialize_field("detail", &serde_json::Value::Null)?,
+        }
         s.end()
     }
 }

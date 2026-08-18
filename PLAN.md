@@ -255,7 +255,9 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
 - `ServerProvider` trait: `list_versions()`, `resolve(version, loader_version) -> Artifact
   {url, sha1?, sha256?, kind}`, `install(dir, artifact) -> LaunchSpec`.
 - Vanilla (version_manifest_v2 → per-version JSON → `downloads.server`, SHA-1),
-  Paper (`/v2/projects/paper` builds, SHA-256), Purpur (`/v2/purpur`, hash where provided),
+  Paper (**`fill.papermc.io/v3`** — the v2 API in the original brief has been sunset and now
+  answers `{"ok":false,"error":"sunset"}`; v3 builds carry SHA-256),
+  Purpur (`/v2/purpur`, MD5 where provided),
   Fabric (meta v2 → server launcher jar), NeoForge (`maven-metadata.xml` → installer),
   Forge (promotions + installer, run headlessly with `--installServer`).
 - Forge/NeoForge ≥ 1.17 produce `libraries/` + `@…/win_args.txt` / `unix_args.txt`
@@ -266,8 +268,9 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
   Never written implicitly.
 - Java detection: PATH, `JAVA_HOME`, common dirs (Program Files/Eclipse Adoptium|Java|Microsoft,
   `/usr/lib/jvm`, SDKMAN, Homebrew), Windows registry (`winreg`); parse `java -version`;
-  map 1.20.5+ → 21, 1.17–1.20.4 → 17, 1.12–1.16.5 → 8/11, older → 8; mismatch warning +
-  per-instance pin; JVM arg defaults (heap, G1GC / Aikar's flags) editable.
+  Java requirement read from Mojang's `javaVersion.majorVersion` where available, with the
+  table (26.x → 25, 1.20.5+ → 21, 1.17–1.20.4 → 17, older → 8) as the offline fallback;
+  mismatch warning + per-instance pin; JVM arg defaults editable.
 - Tests: **version resolution + jar URL building for all six providers** (recorded fixtures,
   no network), Java version-string parsing, MC→Java mapping table.
 

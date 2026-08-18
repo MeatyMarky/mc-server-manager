@@ -7,4 +7,9 @@ export type InstanceView = { id: number, uuid: string, name: string, path: strin
 /**
  * `mods` or `plugins`, derived from the server type.
  */
-contentDir: string, color: string | null, notes: string | null, lastExitCode: number | null, lastStartedAt: string | null, lastStoppedAt: string | null, pid: number | null, createdAt: string, updatedAt: string, };
+contentDir: string, color: string | null, notes: string | null, lastExitCode: number | null, lastStartedAt: string | null, lastStoppedAt: string | null, pid: number | null, 
+/**
+ * When a server was last installed into this folder; null means the
+ * instance has no server files yet.
+ */
+installedAt: string | null, createdAt: string, updatedAt: string, };

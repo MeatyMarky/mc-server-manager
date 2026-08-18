@@ -1,5 +1,7 @@
 pub mod crud;
+pub mod eula;
 pub mod import;
+pub mod install;
 pub mod reconcile;
 
 use serde::{Deserialize, Serialize};

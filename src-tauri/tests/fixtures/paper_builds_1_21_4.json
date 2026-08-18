@@ -1,0 +1,68 @@
+[
+ {
+  "id": 232,
+  "time": "2025-06-09T10:18:55.778Z",
+  "channel": "STABLE",
+  "commits": [
+   {
+    "sha": "12d8fe0beb21c1a1d9b093fb411884367cce9e7e",
+    "time": "2025-06-09T09:57:21Z",
+    "message": "Fix infinite loop in RegionFile IO\n\nIf an exception is thrown during decompress then the read process\nwould be started again, which of course would eventually throw in\nthe decompress process.\n"
+   }
+  ],
+  "downloads": {
+   "server:default": {
+    "name": "paper-1.21.4-232.jar",
+    "checksums": {
+     "sha256": "5ee4f542f628a14c644410b08c94ea42e772ef4d29fe92973636b6813d4eaffc"
+    },
+    "size": 51437498,
+    "url": "https://fill-data.papermc.io/v1/objects/5ee4f542f628a14c644410b08c94ea42e772ef4d29fe92973636b6813d4eaffc/paper-1.21.4-232.jar"
+   }
+  }
+ },
+ {
+  "id": 117,
+  "time": "2025-01-17T15:38:17.205Z",
+  "channel": "STABLE",
+  "commits": [
+   {
+    "sha": "a35cfe93f9f3686279ac44649783ca5a71475a6a",
+    "time": "2025-01-17T15:31:45Z",
+    "message": "Correct version of some network related dependencies\n"
+   }
+  ],
+  "downloads": {
+   "server:default": {
+    "name": "paper-1.21.4-117.jar",
+    "checksums": {
+     "sha256": "f7ddd1a87e6b792197fe4a843214091f9d18635306601a1c3448adf99d58bc7d"
+    },
+    "size": 51361004,
+    "url": "https://fill-data.papermc.io/v1/objects/f7ddd1a87e6b792197fe4a843214091f9d18635306601a1c3448adf99d58bc7d/paper-1.21.4-117.jar"
+   }
+  }
+ },
+ {
+  "id": 1,
+  "time": "2024-12-05T16:48:57.969Z",
+  "channel": "ALPHA",
+  "commits": [
+   {
+    "sha": "4c39ea20c42ee843b1620d35ef82b4ec95673c3b",
+    "time": "2024-12-05T13:44:50Z",
+    "message": "More moving around of hunks\n"
+   }
+  ],
+  "downloads": {
+   "server:default": {
+    "name": "paper-1.21.4-1.jar",
+    "checksums": {
+     "sha256": "05209ac5a423bf98136dd775a87d4324955d2c865f887b20edd6b43a59cb36c4"
+    },
+    "size": 52673513,
+    "url": "https://fill-data.papermc.io/v1/objects/05209ac5a423bf98136dd775a87d4324955d2c865f887b20edd6b43a59cb36c4/paper-1.21.4-1.jar"
+   }
+  }
+ }
+]

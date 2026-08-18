@@ -1,12 +1,19 @@
 // Typed wrappers around Tauri events. The UI subscribes to these; it never polls.
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type { InstanceStatusEvent, QuitRequestedEvent } from "./types";
+import type {
+  InstanceStatusEvent,
+  QuitRequestedEvent,
+  TaskDoneEvent,
+  TaskProgressEvent,
+} from "./types";
 
 export const EVENTS = {
   instancesChanged: "instances://changed",
   instanceStatus: "instance://status",
   quitRequested: "app://quit-requested",
+  taskProgress: "task://progress",
+  taskDone: "task://done",
 } as const;
 
 export function onInstancesChanged(handler: () => void): Promise<UnlistenFn> {
@@ -27,4 +34,14 @@ export function onQuitRequested(
   return listen<QuitRequestedEvent>(EVENTS.quitRequested, (event) =>
     handler(event.payload),
   );
+}
+
+export function onTaskProgress(
+  handler: (payload: TaskProgressEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<TaskProgressEvent>(EVENTS.taskProgress, (event) => handler(event.payload));
+}
+
+export function onTaskDone(handler: (payload: TaskDoneEvent) => void): Promise<UnlistenFn> {
+  return listen<TaskDoneEvent>(EVENTS.taskDone, (event) => handler(event.payload));
 }

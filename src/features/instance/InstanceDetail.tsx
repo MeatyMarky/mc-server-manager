@@ -20,6 +20,7 @@ import { useForceStopInstance } from "@/features/instances/queries";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { SERVER_TYPE_LABEL, STATUS_LABEL } from "@/lib/status";
 import type { InstanceView } from "@/lib/types";
+import { InstallPanel } from "@/features/setup/InstallPanel";
 import { CloneDialog, DeleteDialog, LocateBanner, RenameDialog } from "./dialogs";
 import { PlaceholderTab } from "./tabs/PlaceholderTab";
 import { SettingsTab } from "./tabs/SettingsTab";
@@ -56,6 +57,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
             {instance.loaderVersion ? <Badge>build {instance.loaderVersion}</Badge> : null}
             <span>{STATUS_LABEL[instance.status]}</span>
             {instance.eulaAccepted ? null : <Badge>EULA not accepted</Badge>}
+            {instance.installedAt ? null : <Badge>no server installed</Badge>}
           </p>
         </div>
 
@@ -121,11 +123,22 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
         </TabsList>
 
         <TabsContent value="console">
-          <PlaceholderTab
-            title="Console"
-            phase={3}
-            description="Live stdout and stderr, a command input with history, autoscroll, search and copy."
-          />
+          {missing ? (
+            <PlaceholderTab
+              title="Console"
+              phase={3}
+              description="Locate the instance folder to work with this server again."
+            />
+          ) : (
+            <div className="grid gap-4">
+              <InstallPanel instance={instance} />
+              <PlaceholderTab
+                title="Console"
+                phase={3}
+                description="Live stdout and stderr, a command input with history, autoscroll, search and copy."
+              />
+            </div>
+          )}
         </TabsContent>
         <TabsContent value="mods">
           <PlaceholderTab

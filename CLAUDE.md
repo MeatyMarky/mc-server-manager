@@ -63,6 +63,28 @@ running instance → stdin command (`whitelist add`, `op`, `ban`, …) then re-r
 stopped instance → atomic temp-file + rename write. No call site touches those JSON files
 directly.
 
+### Minecraft versions come in two eras
+`1.MINOR[.PATCH]` and the calendar line (`26.1`, `26.1.2`, `26.2`). Anything that parses,
+compares or sorts a version goes through `mcversion.rs` — a hardcoded "starts with 1." check
+is a bug. NeoForge encodes the target version in its own number and changed encoding with the
+era too (`21.1.65` is 1.21.1; `26.2.0.62` is 26.2).
+
+### Java requirements come from Mojang, not from a table
+The per-version JSON at `piston-meta` states `javaVersion.majorVersion`, and that is what an
+install records. The table in `java/version.rs` is only the offline fallback (26.x needs
+Java 25, 1.20.5+ needs 21, 1.17+ needs 17, older needs 8).
+
+### Downloads
+Bytes land in `<file>.part`, resume with a `Range` request when the server allows it, are
+checksum-verified before the rename, and only then take the final name. A half-downloaded
+file must never be mistaken for a complete one, so nothing else writes to the final path.
+
+### Installer failures
+Forge and NeoForge installers run inside `.msm/staging`. On failure the staging folder is
+deleted (no half-written `libraries/`), the full transcript is kept at `.msm/installer-*.log`,
+and the error carries the log path plus its tail so the UI can show what the installer said
+instead of a generic message.
+
 ### `server.properties`
 The editor preserves comments, key order and unknown keys. Rewriting the file from a typed
 struct alone is not acceptable.
@@ -119,8 +141,12 @@ Do not hand-edit it.
 
 ## Testing
 
-- `cargo test` for Rust; fixtures in `src-tauri/tests/fixtures/`; no network in tests
-  (HTTP clients sit behind a trait, provider tests use recorded payloads).
+- `cargo test` for Rust; fixtures in `src-tauri/tests/fixtures/`; **no network in tests**.
+  Providers are generic over the `Fetch` trait and tests drive them with `FixtureFetch`, which
+  maps a URL to a recorded payload and fails on any URL a test did not record.
+- Live-API checks live in `tests/network_smoke.rs` and are all `#[ignore]`. Run them by hand
+  after touching providers, the downloader or the installer:
+  `cargo test --test network_smoke -- --ignored --nocapture`.
 - Priority coverage: **version resolution, jar URL building, log parsing**, plus
   `server.properties` round-tripping and path handling.
 - Path/OS-specific logic gets tests for both Windows and Linux shapes; parsers accept `\r\n`

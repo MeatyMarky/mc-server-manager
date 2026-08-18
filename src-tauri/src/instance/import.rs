@@ -143,17 +143,10 @@ pub fn classify_jar_name(file_name: &str) -> Option<JarHint> {
     None
 }
 
-/// NeoForge versions are `<mc-minor>.<mc-patch>.<build>`: 21.1.65 means 1.21.1,
-/// and 20.4.0 means 1.20.4. A trailing `.0` patch is written as `1.21`.
+/// Delegates to the NeoForge provider, which owns the version scheme for both
+/// the classic (`21.1.65` -> 1.21.1) and calendar (`26.2.0.62` -> 26.2) eras.
 pub fn neoforge_to_mc_version(neoforge_version: &str) -> Option<String> {
-    let mut parts = neoforge_version.split('.');
-    let minor = parts.next()?.parse::<u32>().ok()?;
-    let patch = parts.next()?.parse::<u32>().ok()?;
-    if patch == 0 {
-        Some(format!("1.{minor}"))
-    } else {
-        Some(format!("1.{minor}.{patch}"))
-    }
+    crate::providers::neoforge::mc_version_for(neoforge_version)
 }
 
 /// Paper and Purpur write `version_history.json`; the line looks like
@@ -224,9 +217,8 @@ fn segment_after(stem: &str, marker: &str) -> Option<String> {
 }
 
 fn looks_like_mc_version(s: &str) -> bool {
-    let mut parts = s.split('.');
-    let major = parts.next().unwrap_or_default();
-    major == "1" && parts.next().map(|m| m.chars().all(|c| c.is_ascii_digit())).unwrap_or(false)
+    // Both eras: 1.21.4 and 26.2 are equally valid.
+    crate::mcversion::looks_like_version(s)
 }
 
 /// Inspects a folder and proposes what to import. Never mutates anything.

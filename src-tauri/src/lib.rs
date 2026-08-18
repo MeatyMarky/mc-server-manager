@@ -1,11 +1,17 @@
 pub mod commands;
 pub mod db;
 pub mod error;
+pub mod download;
 pub mod events;
+pub mod http;
 pub mod instance;
+pub mod java;
+pub mod mcversion;
+pub mod providers;
 pub mod metrics;
 pub mod paths;
 pub mod state;
+pub mod tasks;
 
 use std::path::PathBuf;
 
@@ -43,7 +49,19 @@ pub fn run() {
                 Err(err) => tracing::error!(error = %err, "orphan reconciliation failed"),
             }
 
-            tauri::async_runtime::spawn(metrics::retention::pruner_loop(pool));
+            tauri::async_runtime::spawn(metrics::retention::pruner_loop(pool.clone()));
+            // First run has no Java cached yet; detect in the background so the
+            // Settings tab and install flow have something to offer immediately.
+            tauri::async_runtime::spawn(async move {
+                match java::list(&pool).await {
+                    Ok(known) if !known.is_empty() => {}
+                    Ok(_) => match java::rescan(&pool).await {
+                        Ok(found) => tracing::info!(count = found.len(), "detected Java runtimes"),
+                        Err(err) => tracing::warn!(error = %err, "initial Java detection failed"),
+                    },
+                    Err(err) => tracing::warn!(error = %err, "could not read the Java cache"),
+                }
+            });
             app.manage(state);
             setup_tray(app.handle())?;
             Ok(())
@@ -76,6 +94,18 @@ pub fn run() {
             commands::app::live_instances,
             commands::app::settings_get_all,
             commands::app::settings_set,
+            commands::setup::provider_versions,
+            commands::setup::provider_builds,
+            commands::setup::install_server,
+            commands::setup::task_cancel,
+            commands::setup::eula_get,
+            commands::setup::eula_set,
+            commands::setup::read_installer_log,
+            commands::java::java_list,
+            commands::java::java_rescan,
+            commands::java::java_add_manual,
+            commands::java::java_status,
+            commands::java::java_required_for,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

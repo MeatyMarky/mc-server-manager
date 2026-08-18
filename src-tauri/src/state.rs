@@ -5,6 +5,8 @@ use std::sync::RwLock;
 use sqlx::SqlitePool;
 
 use crate::db::models::{Instance, InstanceStatus, InstanceView};
+use crate::http::Http;
+use crate::tasks::TaskRegistry;
 
 /// Shared backend state. Runtime status lives here and only here — it is never
 /// read back from the database as truth (see PLAN.md §2).
@@ -12,6 +14,10 @@ pub struct AppState {
     pub db: SqlitePool,
     /// Where the database, logs and the artifact cache live.
     pub data_dir: PathBuf,
+    /// One pooled HTTP client for every provider and download.
+    pub http: Http,
+    /// Cancellation tokens for downloads and installs.
+    pub tasks: TaskRegistry,
     statuses: RwLock<HashMap<String, InstanceStatus>>,
 }
 
@@ -20,6 +26,13 @@ impl AppState {
         Self {
             db,
             data_dir,
+            // A client that cannot be built means no TLS backend; a fallback
+            // client keeps the app usable for everything that is not network.
+            http: Http::new().unwrap_or_else(|err| {
+                tracing::error!(error = %err, "falling back to a default HTTP client");
+                Http::default_client()
+            }),
+            tasks: TaskRegistry::default(),
             statuses: RwLock::new(HashMap::new()),
         }
     }

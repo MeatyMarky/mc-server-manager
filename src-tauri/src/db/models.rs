@@ -137,6 +137,8 @@ pub struct Instance {
     pub last_stopped_at: Option<String>,
     pub pid: Option<i64>,
     pub process_start_time: Option<i64>,
+    pub installed_artifact_url: Option<String>,
+    pub installed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -195,6 +197,7 @@ impl Instance {
             last_started_at: self.last_started_at.clone(),
             last_stopped_at: self.last_stopped_at.clone(),
             pid: self.pid,
+            installed_at: self.installed_at.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
         }
@@ -269,6 +272,9 @@ pub struct InstanceView {
     pub last_stopped_at: Option<String>,
     #[ts(type = "number | null")]
     pub pid: Option<i64>,
+    /// When a server was last installed into this folder; null means the
+    /// instance has no server files yet.
+    pub installed_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -391,6 +397,8 @@ mod tests {
             last_stopped_at: None,
             pid: None,
             process_start_time: None,
+            installed_artifact_url: None,
+            installed_at: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }

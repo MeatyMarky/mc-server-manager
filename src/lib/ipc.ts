@@ -5,6 +5,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppErrorShape,
   AppInfo,
+  BuildEntry,
+  EulaStatus,
+  JavaRuntime,
+  JavaStatus,
+  ServerType,
+  VersionEntry,
   CloneInstanceInput,
   CreateInstanceInput,
   DeleteReport,
@@ -64,4 +70,26 @@ export const ipc = {
   instanceForceStop: (id: number) =>
     invoke<InstanceView>("instance_force_stop", { id }),
   instanceOpenFolder: (id: number) => invoke<void>("instance_open_folder", { id }),
+
+  // Phase 2: getting a server into an instance.
+  providerVersions: (serverType: ServerType) =>
+    invoke<VersionEntry[]>("provider_versions", { serverType }),
+  providerBuilds: (serverType: ServerType, mcVersion: string) =>
+    invoke<BuildEntry[]>("provider_builds", { serverType, mcVersion }),
+  /** Returns a task id; progress and the outcome arrive as events. */
+  installServer: (id: number, mcVersion: string, build: string | null) =>
+    invoke<string>("install_server", { id, mcVersion, build }),
+  taskCancel: (taskId: string) => invoke<boolean>("task_cancel", { taskId }),
+  readInstallerLog: (path: string) => invoke<string>("read_installer_log", { path }),
+
+  eulaGet: (id: number) => invoke<EulaStatus>("eula_get", { id }),
+  eulaSet: (id: number, accepted: boolean) =>
+    invoke<EulaStatus>("eula_set", { id, accepted }),
+
+  javaList: () => invoke<JavaRuntime[]>("java_list"),
+  javaRescan: () => invoke<JavaRuntime[]>("java_rescan"),
+  javaAddManual: (path: string) => invoke<JavaRuntime>("java_add_manual", { path }),
+  javaStatus: (id: number) => invoke<JavaStatus>("java_status", { id }),
+  javaRequiredFor: (mcVersion: string) =>
+    invoke<number>("java_required_for", { mcVersion }),
 };
