@@ -115,6 +115,7 @@ pub fn parse_version_detail(body: &str, mc_version: &str) -> AppResult<Artifact>
         kind: ArtifactKind::ServerJar,
         sha1: Some(server.sha1),
         sha256: None,
+        sha512: None,
         md5: None,
         size: Some(server.size),
         build: None,

@@ -302,7 +302,7 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
   delete with confirmation; import/export zip with progress + cancel.
 - Tests: properties round-trip incl. comment preservation, atomic JSON write, world detection.
 
-### Phase 5 — Modrinth + local jar management
+### Phase 5 — Modrinth + local jar management  ✅
 - Modrinth v2 client (search with loader + game-version facets, project, versions, dependencies),
   descriptive User-Agent, rate-limit handling.
 - Install into `mods/` or `plugins/` depending on server type, hash-verified; dependency

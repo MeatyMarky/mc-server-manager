@@ -562,3 +562,164 @@ async fn a_non_ascii_motd_survives_a_real_server_start() {
         assert_eq!(status.code(), Some(0), "the server stopped cleanly");
     }
 }
+
+/// Modrinth, live: the identifying User-Agent is accepted, the budget headers
+/// are read, search is filtered by loader and version, and a real dependency
+/// tree resolves.
+#[tokio::test]
+#[ignore = "hits the Modrinth API"]
+async fn modrinth_search_and_dependency_resolution_work_live() {
+    use mc_server_manager_lib::mods::modrinth::Modrinth;
+    use mc_server_manager_lib::mods::ratelimit::RateLimiter;
+    use mc_server_manager_lib::mods::resolve::{self, Installed};
+    use mc_server_manager_lib::mods::source::{Loader, ModSource, SearchQuery, VersionFilter};
+
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_in(dir.path()).await;
+    let index = providers::index::refresh(&state.db, &state.http).await.unwrap();
+
+    let limiter = std::sync::Arc::new(RateLimiter::default());
+    let modrinth = Modrinth::new(limiter.clone()).unwrap();
+
+    let results = modrinth
+        .search(&SearchQuery {
+            text: "lithium".into(),
+            loaders: vec!["fabric".into()],
+            game_versions: vec!["1.21.4".into()],
+            limit: Some(5),
+            offset: None,
+        })
+        .await
+        .expect("search");
+
+    assert!(!results.is_empty(), "search returned nothing");
+    println!(
+        "search: {}",
+        results
+            .iter()
+            .map(|project| project.title.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    // The budget headers were read and recorded by the shared limiter.
+    let budget = limiter
+        .budget("api.modrinth.com")
+        .expect("Modrinth publishes a rate limit budget");
+    println!("budget: {} remaining, resets in {}s", budget.remaining, budget.reset_in);
+    assert!(budget.remaining > 0);
+
+    // Waystones needs Fabric API and Balm: a real tree, resolved live.
+    let versions = modrinth
+        .versions(
+            "LOpKHB2A",
+            &VersionFilter {
+                loaders: vec!["fabric".into()],
+                game_versions: vec!["1.21.4".into()],
+            },
+        )
+        .await
+        .expect("versions");
+    let root = resolve::pick_version(&versions, Loader::Fabric, "1.21.4", &index)
+        .expect("a Waystones build for 1.21.4");
+
+    let plan = resolve::plan(
+        &modrinth,
+        root,
+        Loader::Fabric,
+        "1.21.4",
+        &index,
+        &Installed::default(),
+    )
+    .await
+    .expect("resolve");
+
+    println!(
+        "plan: {}",
+        plan.install
+            .iter()
+            .map(|planned| format!("{} {}", planned.project_title, planned.version_number))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert!(plan.install.len() >= 3, "the tree should pull in dependencies");
+    assert!(plan
+        .install
+        .iter()
+        .all(|planned| planned.file_name.ends_with(".jar")));
+    assert!(plan.total_size > 0);
+}
+
+/// Installing a mod for real: the jar lands in the right folder for the server
+/// type, its SHA-512 verifies, and the row records where it came from.
+#[tokio::test]
+#[ignore = "downloads mods from Modrinth"]
+async fn a_mod_installs_into_the_right_folder() {
+    use mc_server_manager_lib::mods::{self, modrinth::Modrinth, ratelimit::RateLimiter};
+    use mc_server_manager_lib::mods::resolve::{self, Installed};
+    use mc_server_manager_lib::mods::source::{Loader, ModSource, VersionFilter};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let state = state_in(&root).await;
+    let index = providers::index::refresh(&state.db, &state.http).await.unwrap();
+
+    // A Fabric instance loads mods/, so that is where the jar must go.
+    let inst = instance_in(&state, &root, "fabric", ServerType::Fabric, "1.21.4").await;
+    let modrinth = Modrinth::new(std::sync::Arc::new(RateLimiter::default())).unwrap();
+
+    let versions = modrinth
+        .versions(
+            "gvQqBUqZ", // Lithium: server-side, small, no dependencies.
+            &VersionFilter {
+                loaders: vec!["fabric".into()],
+                game_versions: vec!["1.21.4".into()],
+            },
+        )
+        .await
+        .unwrap();
+    let version = resolve::pick_version(&versions, Loader::Fabric, "1.21.4", &index).unwrap();
+
+    let plan = resolve::plan(
+        &modrinth,
+        version.clone(),
+        Loader::Fabric,
+        "1.21.4",
+        &index,
+        &Installed::default(),
+    )
+    .await
+    .unwrap();
+
+    let planned = &plan.install[0];
+    mods::install_planned(&state, inst.id, planned, &version, &CancellationToken::new())
+        .await
+        .expect("install");
+
+    let jar = inst.path_buf().join("mods").join(&planned.file_name);
+    assert!(jar.is_file(), "the jar is in mods/: {}", jar.display());
+    assert!(!inst.path_buf().join("plugins").exists(), "no plugins folder for Fabric");
+
+    let view = mods::list(&state, inst.id).await.unwrap();
+    assert_eq!(view.content_dir.as_deref(), Some("mods"));
+    let installed = view
+        .mods
+        .iter()
+        .find(|entry| entry.file_name == planned.file_name)
+        .expect("the mod is listed");
+    assert!(installed.enabled);
+    assert_eq!(
+        installed.tracked.as_ref().and_then(|row| row.project_id.clone()),
+        Some("gvQqBUqZ".to_string())
+    );
+    // The jar's own metadata was read back out of the file.
+    assert!(installed.metadata.is_some(), "fabric.mod.json was read");
+    assert!(installed.mismatch.is_none(), "{:?}", installed.mismatch);
+
+    // Disabling renames it, and the server would ignore it.
+    mods::set_enabled(&state, inst.id, &planned.file_name, false)
+        .await
+        .unwrap();
+    assert!(!jar.exists());
+    assert!(jar.with_file_name(format!("{}.disabled", planned.file_name)).is_file());
+}

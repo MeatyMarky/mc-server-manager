@@ -24,6 +24,8 @@ use crate::providers::Artifact;
 /// Which digest a provider published for an artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
+    /// Modrinth publishes SHA-512 for every file in a pack.
+    Sha512,
     Sha256,
     Sha1,
     Md5,
@@ -32,6 +34,7 @@ pub enum Algorithm {
 impl Algorithm {
     pub fn as_str(self) -> &'static str {
         match self {
+            Algorithm::Sha512 => "SHA-512",
             Algorithm::Sha256 => "SHA-256",
             Algorithm::Sha1 => "SHA-1",
             Algorithm::Md5 => "MD5",
@@ -41,6 +44,9 @@ impl Algorithm {
 
 /// The strongest checksum the artifact carries, if any.
 pub fn expected_checksum(artifact: &Artifact) -> Option<(Algorithm, String)> {
+    if let Some(sha512) = &artifact.sha512 {
+        return Some((Algorithm::Sha512, sha512.to_ascii_lowercase()));
+    }
     if let Some(sha256) = &artifact.sha256 {
         return Some((Algorithm::Sha256, sha256.to_ascii_lowercase()));
     }
@@ -66,6 +72,7 @@ pub fn hash_file_sync(path: &Path, algorithm: Algorithm) -> AppResult<String> {
     let mut file = std::fs::File::open(path).ctx("open file", path)?;
     let mut buffer = vec![0u8; 1024 * 1024];
 
+    let mut sha512 = sha2::Sha512::new();
     let mut sha256 = sha2::Sha256::new();
     let mut sha1 = sha1::Sha1::new();
     let mut md5 = md5::Md5::new();
@@ -76,6 +83,7 @@ pub fn hash_file_sync(path: &Path, algorithm: Algorithm) -> AppResult<String> {
             break;
         }
         match algorithm {
+            Algorithm::Sha512 => sha512.update(&buffer[..read]),
             Algorithm::Sha256 => sha256.update(&buffer[..read]),
             Algorithm::Sha1 => sha1.update(&buffer[..read]),
             Algorithm::Md5 => md5.update(&buffer[..read]),
@@ -83,6 +91,7 @@ pub fn hash_file_sync(path: &Path, algorithm: Algorithm) -> AppResult<String> {
     }
 
     Ok(match algorithm {
+        Algorithm::Sha512 => hex::encode(sha512.finalize()),
         Algorithm::Sha256 => hex::encode(sha256.finalize()),
         Algorithm::Sha1 => hex::encode(sha1.finalize()),
         Algorithm::Md5 => hex::encode(md5.finalize()),
@@ -272,6 +281,7 @@ mod tests {
             kind: ArtifactKind::ServerJar,
             sha1: None,
             sha256: None,
+            sha512: None,
             md5: None,
             size: None,
             build: None,

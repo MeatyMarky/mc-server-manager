@@ -1,0 +1,40 @@
+{
+ "formatVersion": 1,
+ "game": "minecraft",
+ "versionId": "1.0.0",
+ "name": "Pack With A Disallowed Host",
+ "files": [
+  {
+   "path": "mods/lithium-fabric-0.15.3+mc1.21.4.jar",
+   "hashes": {
+    "sha512": "b8b541c0e968571c0f8d1f6dd6b1a3ff58f26f2c8b5a6a3b5f0f9a5e0b8b7b6c9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4938271605f4e3d2c1b0a99887766554433"
+   },
+   "env": {
+    "client": "required",
+    "server": "required"
+   },
+   "downloads": [
+    "https://cdn.modrinth.com/data/gvQqBUqZ/versions/u8pHPXJl/lithium-fabric-0.15.3%2Bmc1.21.4.jar"
+   ],
+   "fileSize": 797555
+  },
+  {
+   "path": "mods/backdoor.jar",
+   "hashes": {
+    "sha512": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   },
+   "env": {
+    "client": "required",
+    "server": "required"
+   },
+   "downloads": [
+    "https://evil.example.com/payload/backdoor.jar"
+   ],
+   "fileSize": 2048
+  }
+ ],
+ "dependencies": {
+  "minecraft": "1.21.4",
+  "fabric-loader": "0.16.9"
+ }
+}

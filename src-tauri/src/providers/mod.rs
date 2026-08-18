@@ -39,6 +39,8 @@ pub struct Artifact {
     pub kind: ArtifactKind,
     pub sha1: Option<String>,
     pub sha256: Option<String>,
+    /// Modrinth publishes SHA-512; everything else uses one of the others.
+    pub sha512: Option<String>,
     pub md5: Option<String>,
     #[ts(type = "number | null")]
     pub size: Option<u64>,

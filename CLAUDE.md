@@ -128,6 +128,33 @@ files from older servers; escaped `\uXXXX` input is decoded on read. A non-ASCII
 survive read, edit, write *and* the server rewriting the file on boot — there is a live test
 for exactly that.
 
+### Mods come from a source behind a trait
+`mods::source::ModSource` is the boundary: search, project, versions. Modrinth is the one
+implementation, and no Modrinth-shaped type, id format or facet string may appear outside
+`mods/modrinth.rs` — CurseForge has to be a second implementation, never a second code path.
+Modrinth also requires an identifying User-Agent (project, version, contact URL) and
+publishes a request budget in headers; `mods::ratelimit` holds one limiter per host for the
+whole app and backs off on 429 rather than retrying blind.
+
+### The install target comes from the server type, never from the jar
+Paper and Purpur load `plugins/`, Fabric/Forge/NeoForge load `mods/`, vanilla loads neither
+and is refused with a sentence explaining what to install instead. A jar that declares a
+different loader or Minecraft version is a **warning**, not a refusal: declarations are
+often conservative and refusing would be wrong more often than warning.
+
+### Dependency resolution is confirmed before anything downloads
+Required dependencies are followed recursively into a plan the user confirms; optional ones
+are listed and never installed on their own; two versions of one project is a conflict that
+is refused by name. Everything installed is recorded in `mods`/`mod_dependencies` so an
+uninstall can say what depended on it.
+
+### `.mrpack` import
+The `env` field decides what a server gets: a file marked `unsupported` on the server side is
+skipped entirely, because a client-only mod on a server is a guaranteed crash. Download URLs
+must be on Modrinth's allowlisted hosts and every file must carry a SHA-512, or the pack is
+refused with the offending file named. The import is staged in `.msm/pack-staging`, verified,
+and only then committed, so a failed import leaves no half-populated `mods/`.
+
 ### Worlds
 A world is any folder holding a `level.dat`; its metadata comes from the NBT, gzipped or not.
 Sizing walks every region file, so it runs in `spawn_blocking` behind a task id with progress

@@ -21,6 +21,7 @@ import { SERVER_TYPE_LABEL, STATUS_LABEL } from "@/lib/status";
 import type { InstanceView } from "@/lib/types";
 import { ConfigTab } from "@/features/config/ConfigTab";
 import { ConsoleTab } from "@/features/console/ConsoleTab";
+import { ModsTab } from "@/features/mods/ModsTab";
 import { PlayersTab } from "@/features/players/PlayersTab";
 import { WorldsTab } from "@/features/worlds/WorldsTab";
 import { RunControls } from "@/features/console/RunControls";
@@ -126,12 +127,16 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
             <ConsoleTab instance={instance} />
           )}
         </TabsContent>
-        <TabsContent value="mods">
-          <PlaceholderTab
-            title={instance.contentDir === "plugins" ? "Plugins" : "Mods"}
-            phase={5}
-            description="Modrinth search filtered by loader and version, one-click install with dependency resolution, and local jar drag-and-drop."
-          />
+        <TabsContent value="mods" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title={instance.contentDir === "plugins" ? "Plugins" : "Mods"}
+              phase={5}
+              description="Locate the instance folder to manage its content."
+            />
+          ) : (
+            <ModsTab instance={instance} />
+          )}
         </TabsContent>
         <TabsContent value="config" className="min-h-0">
           {missing ? (

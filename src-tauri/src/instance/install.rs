@@ -468,6 +468,7 @@ mod tests {
             kind: ArtifactKind::ServerJar,
             sha1: None,
             sha256: None,
+            sha512: None,
             md5: None,
             size: None,
             build: None,

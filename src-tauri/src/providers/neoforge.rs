@@ -132,6 +132,7 @@ pub async fn resolve<F: Fetch>(
         kind: ArtifactKind::Installer,
         sha1: None,
         sha256: None,
+        sha512: None,
         md5: None,
         size: None,
         build: Some(chosen.id),

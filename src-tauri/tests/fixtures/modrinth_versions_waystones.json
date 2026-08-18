@@ -1,0 +1,82 @@
+[
+ {
+  "id": "rgbIrxOX",
+  "project_id": "LOpKHB2A",
+  "name": "21.4.19+fabric-1.21.4",
+  "version_number": "21.4.19+fabric-1.21.4",
+  "version_type": "release",
+  "date_published": "2025-09-08T15:46:17.894689Z",
+  "game_versions": [
+   "1.21.4"
+  ],
+  "loaders": [
+   "fabric"
+  ],
+  "dependencies": [
+   {
+    "version_id": null,
+    "project_id": "P7dR8mSH",
+    "file_name": null,
+    "dependency_type": "required"
+   },
+   {
+    "version_id": null,
+    "project_id": "MBAkmtvl",
+    "file_name": null,
+    "dependency_type": "required"
+   }
+  ],
+  "files": [
+   {
+    "url": "https://cdn.modrinth.com/data/LOpKHB2A/versions/rgbIrxOX/waystones-fabric-1.21.4-21.4.19.jar",
+    "filename": "waystones-fabric-1.21.4-21.4.19.jar",
+    "primary": true,
+    "size": 900232,
+    "hashes": {
+     "sha1": "e0da6a6597b84b7ab5bcc441c7ece7cb34869b15",
+     "sha512": "320ab9641109cc4b382a349c930be4af2560f6676036ba7a32f2eabf1670da60c411f6ebe881d2961ecd288f1e717c0dbea7cef0294f5545bd81f0ad556e5ed5"
+    }
+   }
+  ]
+ },
+ {
+  "id": "B3tC56vT",
+  "project_id": "LOpKHB2A",
+  "name": "21.4.18+fabric-1.21.4",
+  "version_number": "21.4.18+fabric-1.21.4",
+  "version_type": "release",
+  "date_published": "2025-08-06T18:55:49.037389Z",
+  "game_versions": [
+   "1.21.4"
+  ],
+  "loaders": [
+   "fabric"
+  ],
+  "dependencies": [
+   {
+    "version_id": null,
+    "project_id": "MBAkmtvl",
+    "file_name": null,
+    "dependency_type": "required"
+   },
+   {
+    "version_id": null,
+    "project_id": "P7dR8mSH",
+    "file_name": null,
+    "dependency_type": "required"
+   }
+  ],
+  "files": [
+   {
+    "url": "https://cdn.modrinth.com/data/LOpKHB2A/versions/B3tC56vT/waystones-fabric-1.21.4-21.4.18.jar",
+    "filename": "waystones-fabric-1.21.4-21.4.18.jar",
+    "primary": true,
+    "size": 900070,
+    "hashes": {
+     "sha1": "23a61f752958fa2c9129579dc906d7702596601a",
+     "sha512": "a5e7bd0b70e2789fd1c11eaa44a8112e7d3eb7a88741e6c4b87a12a95a88bea1cc10d8f7eae984da37bacf1d440f18d87a4820b46d8dffb37c42f198021c8644"
+    }
+   }
+  ]
+ }
+]

@@ -1,0 +1,22 @@
+{
+ "id": "P7dR8mSH",
+ "slug": "fabric-api",
+ "title": "Fabric API",
+ "description": "Lightweight and modular API providing common hooks and intercompatibility measures utilized by mods using the Fabric toolchain.",
+ "categories": [
+  "library"
+ ],
+ "loaders": [
+  "fabric"
+ ],
+ "icon_url": "https://cdn.modrinth.com/data/P7dR8mSH/icon.png",
+ "downloads": 235426950,
+ "game_versions": [
+  "26.3-snapshot-4",
+  "26.3-snapshot-5",
+  "26.3-snapshot-6",
+  "26.3-snapshot-7",
+  "26.3-snapshot-8",
+  "26.3-snapshot-9"
+ ]
+}

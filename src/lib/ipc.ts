@@ -9,8 +9,14 @@ import type {
   EulaStatus,
   JavaRuntime,
   JavaStatus,
+  InstallPlan,
   KeyInfo,
+  ModView,
+  ModsView,
   Mutation,
+  PackPlan,
+  Project,
+  SourceVersion,
   MutationReport,
   ParsedLine,
   PlayerLists,
@@ -143,4 +149,32 @@ export const ipc = {
     invoke<string>("world_export", { id, folder, target }),
   worldImport: (id: number, archive: string, folder: string | null) =>
     invoke<string>("world_import", { id, archive, folder }),
+
+  // Phase 5: mods, plugins and packs.
+  modsList: (id: number) => invoke<ModsView>("mods_list", { id }),
+  modsSearch: (id: number, text: string, limit?: number, offset?: number) =>
+    invoke<Project[]>("mods_search", { id, text, limit, offset }),
+  modsVersions: (id: number, projectId: string) =>
+    invoke<SourceVersion[]>("mods_versions", { id, projectId }),
+  /** Resolves dependencies. Nothing is downloaded until the plan is confirmed. */
+  modsPlan: (id: number, projectId: string, versionId: string | null) =>
+    invoke<InstallPlan>("mods_plan", { id, projectId, versionId }),
+  /** Returns a task id; progress arrives as task events. */
+  modsInstall: (id: number, plan: InstallPlan) =>
+    invoke<string>("mods_install", { id, plan }),
+  modsSetEnabled: (id: number, fileName: string, enabled: boolean) =>
+    invoke<ModsView>("mods_set_enabled", { id, fileName, enabled }),
+  modsSetPinned: (id: number, fileName: string, pinned: boolean) =>
+    invoke<ModsView>("mods_set_pinned", { id, fileName, pinned }),
+  /** Resolves with the names of mods that depended on the removed one. */
+  modsUninstall: (id: number, fileName: string) =>
+    invoke<string[]>("mods_uninstall", { id, fileName }),
+  modsInstallLocal: (id: number, path: string) =>
+    invoke<ModView>("mods_install_local", { id, path }),
+  modsCheckUpdates: (id: number) => invoke<ModsView>("mods_check_updates", { id }),
+
+  mrpackPlan: (id: number, archive: string) =>
+    invoke<PackPlan>("mrpack_plan", { id, archive }),
+  mrpackImport: (id: number, archive: string) =>
+    invoke<string>("mrpack_import", { id, archive }),
 };

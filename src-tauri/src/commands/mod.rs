@@ -6,6 +6,7 @@ pub mod config;
 pub mod instances;
 pub mod players;
 pub mod java;
+pub mod mods;
 pub mod process;
 pub mod setup;
 pub mod worlds;

@@ -1,0 +1,26 @@
+{
+ "id": "LOpKHB2A",
+ "slug": "waystones",
+ "title": "Waystones",
+ "description": "Teleport from waystone to waystone or craft magical scrolls to warp.",
+ "categories": [
+  "adventure",
+  "magic",
+  "transportation"
+ ],
+ "loaders": [
+  "fabric",
+  "forge",
+  "neoforge"
+ ],
+ "icon_url": "https://cdn.modrinth.com/data/LOpKHB2A/d56c030a875582aff5bab477ddcfec317a1610f0_96.webp",
+ "downloads": 23379862,
+ "game_versions": [
+  "1.21.8",
+  "1.21.9",
+  "1.21.10",
+  "1.21.11",
+  "26.1.2",
+  "26.2"
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "id": "MBAkmtvl",
+ "slug": "balm",
+ "title": "Balm",
+ "description": "Abstraction Layer for Multi-Loader Mods",
+ "categories": [
+  "library"
+ ],
+ "loaders": [
+  "fabric",
+  "forge",
+  "neoforge"
+ ],
+ "icon_url": "https://cdn.modrinth.com/data/MBAkmtvl/285b7bcfd6e525c043e640b08f3efc0cde90f7dd_96.webp",
+ "downloads": 55238036,
+ "game_versions": [
+  "1.21.10",
+  "1.21.11",
+  "26.1",
+  "26.1.1",
+  "26.1.2",
+  "26.2"
+ ]
+}

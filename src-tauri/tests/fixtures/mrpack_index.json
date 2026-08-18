@@ -1,0 +1,67 @@
+{
+ "formatVersion": 1,
+ "game": "minecraft",
+ "versionId": "1.0.0",
+ "name": "Test Pack",
+ "summary": "A small pack used to test import rules.",
+ "files": [
+  {
+   "path": "mods/lithium-fabric-0.15.3+mc1.21.4.jar",
+   "hashes": {
+    "sha1": "b7100505d1178b0f9a1dac4a24472ad1293b890c",
+    "sha512": "b8b541c0e968571c0f8d1f6dd6b1a3ff58f26f2c8b5a6a3b5f0f9a5e0b8b7b6c9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4938271605f4e3d2c1b0a99887766554433"
+   },
+   "env": {
+    "client": "required",
+    "server": "required"
+   },
+   "downloads": [
+    "https://cdn.modrinth.com/data/gvQqBUqZ/versions/u8pHPXJl/lithium-fabric-0.15.3%2Bmc1.21.4.jar"
+   ],
+   "fileSize": 797555
+  },
+  {
+   "path": "mods/sodium-fabric-0.6.9+mc1.21.4.jar",
+   "hashes": {
+    "sha1": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "sha512": "c9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4938271605f4e3d2c1b0a99887766554433b8b541c0e968571c0f8d1f6dd6b1a3ff58f26f2c8b5a6a3b5f0f9a5e0b8b7b6"
+   },
+   "env": {
+    "client": "required",
+    "server": "unsupported"
+   },
+   "downloads": [
+    "https://cdn.modrinth.com/data/AANobbMI/versions/pP4bJ2wD/sodium-fabric-0.6.9%2Bmc1.21.4.jar"
+   ],
+   "fileSize": 1204118
+  },
+  {
+   "path": "mods/no-env-library-1.0.0.jar",
+   "hashes": {
+    "sha512": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+   },
+   "downloads": [
+    "https://cdn.modrinth.com/data/MBAkmtvl/versions/abc123/no-env-library-1.0.0.jar"
+   ],
+   "fileSize": 51200
+  },
+  {
+   "path": "mods/optional-on-server.jar",
+   "hashes": {
+    "sha512": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+   },
+   "env": {
+    "client": "optional",
+    "server": "optional"
+   },
+   "downloads": [
+    "https://cdn.modrinth.com/data/xyz/versions/def456/optional-on-server.jar"
+   ],
+   "fileSize": 10240
+  }
+ ],
+ "dependencies": {
+  "minecraft": "1.21.4",
+  "fabric-loader": "0.16.9"
+ }
+}

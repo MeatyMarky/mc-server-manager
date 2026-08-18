@@ -11,6 +11,7 @@ pub mod logparse;
 pub mod mcversion;
 pub mod providers;
 pub mod metrics;
+pub mod mods;
 pub mod paths;
 pub mod players;
 pub mod process;
@@ -131,6 +132,19 @@ pub fn run() {
             commands::worlds::world_delete,
             commands::worlds::world_export,
             commands::worlds::world_import,
+            commands::mods::mods_list,
+            commands::mods::mods_search,
+            commands::mods::mods_versions,
+            commands::mods::mods_plan,
+            commands::mods::mods_install,
+            commands::mods::mods_set_enabled,
+            commands::mods::mods_set_pinned,
+            commands::mods::mods_uninstall,
+            commands::mods::mods_install_local,
+            commands::mods::mods_check_updates,
+            commands::mods::mods_loader,
+            commands::mods::mrpack_plan,
+            commands::mods::mrpack_import,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

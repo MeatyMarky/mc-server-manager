@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 
 use crate::db::models::{Instance, InstanceStatus, InstanceView};
 use crate::http::Http;
+use crate::mods::ratelimit::RateLimiter;
 use crate::process::supervisor::Supervisor;
 use crate::tasks::TaskRegistry;
 
@@ -21,6 +22,8 @@ pub struct AppState {
     pub tasks: TaskRegistry,
     /// Running servers and their console history.
     pub supervisor: Supervisor,
+    /// One request budget per API host, shared by every mod lookup.
+    pub rate_limiter: std::sync::Arc<RateLimiter>,
     statuses: RwLock<HashMap<String, InstanceStatus>>,
 }
 
@@ -37,6 +40,7 @@ impl AppState {
             }),
             tasks: TaskRegistry::default(),
             supervisor: Supervisor::default(),
+            rate_limiter: std::sync::Arc::new(RateLimiter::default()),
             statuses: RwLock::new(HashMap::new()),
         }
     }

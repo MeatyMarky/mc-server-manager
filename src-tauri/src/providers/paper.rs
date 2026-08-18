@@ -86,6 +86,7 @@ fn artifact_from_build(build: Build, mc_version: &str) -> AppResult<Artifact> {
         kind: ArtifactKind::ServerJar,
         sha1: None,
         sha256: download.checksums.get("sha256").cloned(),
+        sha512: download.checksums.get("sha512").cloned(),
         md5: None,
         size: download.size,
         build: Some(build.id.to_string()),

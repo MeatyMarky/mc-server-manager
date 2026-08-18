@@ -117,6 +117,7 @@ pub async fn resolve<F: Fetch>(
         kind: ArtifactKind::ServerJar,
         sha1: None,
         sha256: None,
+        sha512: None,
         md5: detail.md5,
         size: None,
         build: Some(detail.build),

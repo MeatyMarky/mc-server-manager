@@ -1,0 +1,85 @@
+{
+ "hits": [
+  {
+   "project_id": "gvQqBUqZ",
+   "slug": "lithium",
+   "title": "Lithium",
+   "description": "No-compromises game logic optimization mod, useful for both single-player games and multi-player servers.",
+   "author": "jellysquid3",
+   "downloads": 119314748,
+   "icon_url": "https://cdn.modrinth.com/data/gvQqBUqZ/bcc8686c13af0143adf4285d741256af824f70b7_96.webp",
+   "categories": [
+    "fabric",
+    "neoforge",
+    "optimization",
+    "quilt"
+   ],
+   "versions": [
+    "1.21.10",
+    "1.21.11",
+    "26.1",
+    "26.1.1",
+    "26.1.2",
+    "26.2"
+   ],
+   "latest_version": "u8pHPXJl",
+   "project_type": "mod"
+  },
+  {
+   "project_id": "JNRr4jji",
+   "slug": "mpalladium",
+   "title": "Palladium",
+   "description": "Another optimizing mod, provides deduplication, improved memory control, shader/chunk/nbt optimizations and enchanced mob AI.\n\nFull compatible with Sodium/Forks, Lithium/Forks, Iris/Forks",
+   "author": "Mr.Toad",
+   "downloads": 918687,
+   "icon_url": "https://cdn.modrinth.com/data/JNRr4jji/f278059c6af8dc0b8bf29b85915fa520bf20cbfb_96.webp",
+   "categories": [
+    "fabric",
+    "forge",
+    "library",
+    "neoforge",
+    "optimization",
+    "quilt",
+    "utility"
+   ],
+   "versions": [
+    "1.21.3",
+    "1.21.4",
+    "1.21.5",
+    "1.21.6",
+    "1.21.7",
+    "1.21.8"
+   ],
+   "latest_version": "GCfUgm6z",
+   "project_type": "mod"
+  },
+  {
+   "project_id": "WGGNOhWY",
+   "slug": "inputbooster",
+   "title": "inputbooster",
+   "description": "InputBooster \u2013 Ultra-fast input polling for Minecraft PvP, capturing missed clicks, maintaining sprint, and improving combat responsiveness, even at low FPS. Compatible with Fabric and performance mods like Sodium & Lithium.",
+   "author": "Ahaduzzamankhan",
+   "downloads": 16314,
+   "icon_url": "https://cdn.modrinth.com/data/WGGNOhWY/12093b8f3207dd675cab28d48d46c14c61b571eb_96.webp",
+   "categories": [
+    "fabric",
+    "neoforge",
+    "optimization",
+    "quilt"
+   ],
+   "versions": [
+    "1.21.9",
+    "1.21.10",
+    "1.21.11",
+    "26.1",
+    "26.1.1",
+    "26.1.2"
+   ],
+   "latest_version": "IpKCs9K8",
+   "project_type": "mod"
+  }
+ ],
+ "offset": 0,
+ "limit": 3,
+ "total_hits": 3
+}
