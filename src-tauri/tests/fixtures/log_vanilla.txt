@@ -1,0 +1,25 @@
+Starting net.minecraft.server.Main
+[12:34:50] [ServerMain/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
+[12:34:51] [ServerMain/INFO]: Loaded 1370 recipes
+[12:34:52] [Server thread/INFO]: Starting minecraft server version 1.21.4
+[12:34:52] [Server thread/INFO]: Loading properties
+[12:34:52] [Server thread/INFO]: Default game type: SURVIVAL
+[12:34:52] [Server thread/INFO]: Generating keypair
+[12:34:52] [Server thread/INFO]: Starting Minecraft server on *:25565
+[12:34:52] [Server thread/INFO]: Using epoll channel type
+[12:34:53] [Server thread/INFO]: Preparing level "world"
+[12:34:55] [Server thread/INFO]: Preparing start region for dimension minecraft:overworld
+[12:34:56] [Worker-Main-1/INFO]: Preparing spawn area: 44%
+[12:34:57] [Server thread/INFO]: Time elapsed: 3218 ms
+[12:34:57] [Server thread/INFO]: Done (7.214s)! For help, type "help"
+[12:35:10] [User Authenticator #1/INFO]: UUID of player Notch is 069a79f4-44e9-4726-a5be-fca90e38aaf5
+[12:35:10] [Server thread/INFO]: Notch[/127.0.0.1:52222] logged in with entity id 172 at (12.5, 68.0, -8.5)
+[12:35:10] [Server thread/INFO]: Notch joined the game
+[12:36:02] [Server thread/INFO]: <Notch> hello world
+[12:37:41] [Server thread/INFO]: Notch lost connection: Disconnected
+[12:37:41] [Server thread/INFO]: Notch left the game
+[12:38:00] [Server thread/INFO]: Stopping the server
+[12:38:00] [Server thread/INFO]: Saving players
+[12:38:00] [Server thread/INFO]: Saving worlds
+[12:38:01] [Server thread/INFO]: Saved the game
+[12:38:01] [Server thread/INFO]: ThreadedAnvilChunkStorage (world): All chunks are saved

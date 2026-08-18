@@ -93,6 +93,28 @@ deleted (no half-written `libraries/`), the full transcript is kept at `.msm/ins
 and the error carries the log path plus its tail so the UI can show what the installer said
 instead of a generic message.
 
+### Stopping a server has stages
+`stop` on stdin → wait `stop_timeout_s` → SIGTERM (`taskkill /T` on Windows) → wait → SIGKILL
+(`taskkill /F`). The stage actually reached is returned and shown, so "stopped cleanly" and
+"had to be killed" never read the same. Servers are started in their own process group so a
+stop reaches the JVM's children.
+
+### Console output is batched, never per line
+A server generating chunks prints thousands of lines a second. Lines go into a bounded ring
+buffer (5 000) plus rotated files under `.msm/console/`, and are emitted as one
+`instance://console` event per 100 ms or per 250 lines. The frontend coalesces those batches
+on an animation frame. One event per line would lock the UI.
+
+### Restarting after a crash is capped
+Auto-restart uses exponential backoff (5 s, 10 s, 20 s… capped at 5 min) and stops entirely
+after `restart_max` crashes inside `restart_window_s`, so a server that dies on boot cannot
+spin. Every attempt and every give-up is written to `instance_events`.
+
+### Log formats differ per family
+Vanilla, Paper, Forge (log4j plus a logger bracket) and Fabric (a parenthesised logger) all
+print differently, and `logparse` handles each; unparsable lines are still shown verbatim.
+Test any parser change against the recorded samples in `tests/fixtures/log_*.txt`.
+
 ### `server.properties`
 The editor preserves comments, key order and unknown keys. Rewriting the file from a typed
 struct alone is not acceptable.

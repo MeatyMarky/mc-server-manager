@@ -1,0 +1,13 @@
+[13:00:00] [main/INFO] (FabricLoader) Loading 24 mods:
+[13:00:00] [main/INFO] (FabricLoader) 	- fabric-api 0.115.0+1.21.4
+[13:00:01] [main/WARN] (FabricLoader) Mod resolution failed for optional dependency, continuing
+[13:00:04] [ServerMain/INFO] (Minecraft) Environment: Environment[sessionHost=https://sessionserver.mojang.com]
+[13:00:06] [Server thread/INFO] (Minecraft) Starting minecraft server version 1.21.4
+[13:00:06] [Server thread/INFO] (Minecraft) Loading properties
+[13:00:07] [Server thread/INFO] (Minecraft) Preparing level "world"
+[13:00:14] [Server thread/INFO] (Minecraft) Done (8.331s)! For help, type "help"
+[13:01:02] [User Authenticator #1/INFO] (Minecraft) UUID of player Jeb_ is 853c80ef-3c37-49fd-aa49-938b674adae6
+[13:01:02] [Server thread/INFO] (Minecraft) Jeb_ joined the game
+[13:03:19] [Server thread/INFO] (Minecraft) Jeb_ left the game
+[13:04:00] [Server thread/INFO] (Minecraft) Stopping the server
+[13:04:01] [Server thread/INFO] (Minecraft) Saved the game

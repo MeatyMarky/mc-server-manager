@@ -4,4 +4,5 @@
 pub mod app;
 pub mod instances;
 pub mod java;
+pub mod process;
 pub mod setup;

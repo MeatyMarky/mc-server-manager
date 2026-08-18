@@ -4,7 +4,6 @@
 use tauri::{AppHandle, Manager, State};
 
 use crate::db::models::ServerType;
-use crate::db::{now_rfc3339, record_event};
 use crate::error::{AppError, AppResult};
 use crate::events;
 use crate::instance::{self, eula::EulaStatus, install};
@@ -79,23 +78,19 @@ pub async fn install_server(
         )
         .await;
 
+        // install() already recorded the outcome on the instance row.
         let done = match result {
-            Ok(outcome) => {
-                match finish_install(&state, id, &mc_version, &outcome).await {
-                    Ok(()) => events::TaskDoneEvent {
-                        task_id: task_id.clone(),
-                        kind: "install".into(),
-                        ok: true,
-                        cancelled: false,
-                        error: None,
-                        error_kind: None,
-                        log_path: None,
-                        log_tail: None,
-                        instance_id: Some(id),
-                    },
-                    Err(err) => done_from_error(&task_id, id, err),
-                }
-            }
+            Ok(_) => events::TaskDoneEvent {
+                task_id: task_id.clone(),
+                kind: "install".into(),
+                ok: true,
+                cancelled: false,
+                error: None,
+                error_kind: None,
+                log_path: None,
+                log_tail: None,
+                instance_id: Some(id),
+            },
             Err(err) => done_from_error(&task_id, id, err),
         };
 
@@ -105,51 +100,6 @@ pub async fn install_server(
     });
 
     Ok(returned)
-}
-
-/// Writes the install result onto the instance row.
-async fn finish_install(
-    state: &AppState,
-    id: i64,
-    mc_version: &str,
-    outcome: &install::InstallOutcome,
-) -> AppResult<()> {
-    let now = now_rfc3339();
-    sqlx::query(
-        "UPDATE instances SET
-            mc_version = ?, loader_version = ?, launch_kind = ?, launch_target = ?,
-            java_major = ?, installed_artifact_url = ?, installed_at = ?, updated_at = ?
-         WHERE id = ?",
-    )
-    .bind(mc_version)
-    .bind(&outcome.build)
-    .bind(outcome.launch_kind)
-    .bind(&outcome.launch_target)
-    .bind(outcome.java_major)
-    .bind(&outcome.artifact_url)
-    .bind(&now)
-    .bind(&now)
-    .bind(id)
-    .execute(&state.db)
-    .await?;
-
-    record_event(
-        &state.db,
-        id,
-        "installed",
-        Some(&format!(
-            "{mc_version}{}",
-            outcome
-                .build
-                .as_ref()
-                .map(|b| format!(" build {b}"))
-                .unwrap_or_default()
-        )),
-    )
-    .await?;
-
-    let instance = instance::get(&state.db, id).await?;
-    instance::crud::write_manifest(&instance).await
 }
 
 /// Installer failures carry their log through to the UI rather than collapsing

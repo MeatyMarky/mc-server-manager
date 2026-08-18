@@ -186,7 +186,55 @@ where
     };
 
     report(Phase::Finalize, 1, Some(1), "Finishing up".to_string());
+    apply_outcome(state, instance.id, mc_version, &outcome).await?;
     Ok(outcome)
+}
+
+/// Writes what the install produced onto the instance row and mirrors it to
+/// `.msm/instance.json`. Part of the install, not of the command wrapper: a
+/// caller that installs must never be left with a stale launch target.
+pub async fn apply_outcome(
+    state: &AppState,
+    id: i64,
+    mc_version: &str,
+    outcome: &InstallOutcome,
+) -> AppResult<()> {
+    let now = now_rfc3339();
+    sqlx::query(
+        "UPDATE instances SET
+            mc_version = ?, loader_version = ?, launch_kind = ?, launch_target = ?,
+            java_major = ?, installed_artifact_url = ?, installed_at = ?, updated_at = ?
+         WHERE id = ?",
+    )
+    .bind(mc_version)
+    .bind(&outcome.build)
+    .bind(outcome.launch_kind)
+    .bind(&outcome.launch_target)
+    .bind(outcome.java_major)
+    .bind(&outcome.artifact_url)
+    .bind(&now)
+    .bind(&now)
+    .bind(id)
+    .execute(&state.db)
+    .await?;
+
+    record_event(
+        &state.db,
+        id,
+        "installed",
+        Some(&format!(
+            "{mc_version}{}",
+            outcome
+                .build
+                .as_ref()
+                .map(|build| format!(" build {build}"))
+                .unwrap_or_default()
+        )),
+    )
+    .await?;
+
+    let instance = super::get(&state.db, id).await?;
+    super::crud::write_manifest(&instance).await
 }
 
 async fn install_jar(dir: &Path, cached: &Path, artifact: &Artifact) -> AppResult<InstallOutcome> {

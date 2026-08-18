@@ -231,7 +231,7 @@ Every long operation registers a `task_id` in a task registry holding a `Cancell
 Each phase ends with: tests passing, `cargo clippy -D warnings` and `tsc --noEmit` clean,
 a manual smoke check on Windows, and a commit. I stop for your review after each one.
 
-### Phase 1 — Scaffold, DB, instance CRUD, folder layout
+### Phase 1 — Scaffold, DB, instance CRUD, folder layout  ✅
 - `git init`; pnpm + Vite + React + TS + Tailwind + shadcn; Tauri v2 scaffold with capabilities.
 - `AppError` (thiserror) + serialized error surface; tracing to a rotating log file.
 - sqlx SQLite pool + migration `0001_init.sql` (full schema above); DB in the platform config dir.
@@ -251,7 +251,7 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
 - Tests: path builders, name→folder sanitization, clone exclude rules, import detection,
   pid/start-time reconciliation, retention-prune SQL.
 
-### Phase 2 — Server jar downloads (all six types) + Java detection
+### Phase 2 — Server jar downloads (all six types) + Java detection  ✅
 - `ServerProvider` trait: `list_versions()`, `resolve(version, loader_version) -> Artifact
   {url, sha1?, sha256?, kind}`, `install(dir, artifact) -> LaunchSpec`.
 - Vanilla (version_manifest_v2 → per-version JSON → `downloads.server`, SHA-1),
@@ -274,7 +274,7 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
 - Tests: **version resolution + jar URL building for all six providers** (recorded fixtures,
   no network), Java version-string parsing, MC→Java mapping table.
 
-### Phase 3 — Process control + console
+### Phase 3 — Process control + console  ✅
 - Supervisor: `HashMap<uuid, RunningInstance>`, spawn via `tokio::process::Command`
   (`kill_on_drop`, job object on Windows / process group on Linux so the JVM cannot orphan).
 - Start: argv from `LaunchSpec` + JVM args + heap flags; working dir = instance path.

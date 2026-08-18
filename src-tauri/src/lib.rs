@@ -6,10 +6,12 @@ pub mod events;
 pub mod http;
 pub mod instance;
 pub mod java;
+pub mod logparse;
 pub mod mcversion;
 pub mod providers;
 pub mod metrics;
 pub mod paths;
+pub mod process;
 pub mod state;
 pub mod tasks;
 
@@ -106,6 +108,14 @@ pub fn run() {
             commands::java::java_add_manual,
             commands::java::java_status,
             commands::java::java_required_for,
+            commands::process::instance_start,
+            commands::process::instance_stop,
+            commands::process::instance_kill,
+            commands::process::instance_restart,
+            commands::process::instance_send_command,
+            commands::process::console_tail,
+            commands::process::command_history,
+            commands::process::port_status,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

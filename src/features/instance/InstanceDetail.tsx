@@ -1,4 +1,4 @@
-import { Copy, FolderOpen, MoreVertical, Pencil, Square, Trash2 } from "lucide-react";
+import { Copy, FolderOpen, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -16,11 +16,11 @@ import {
   TabsTrigger,
 } from "@/components/ui/misc";
 import { StatusDot } from "@/features/instances/InstanceSidebar";
-import { useForceStopInstance } from "@/features/instances/queries";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { SERVER_TYPE_LABEL, STATUS_LABEL } from "@/lib/status";
 import type { InstanceView } from "@/lib/types";
-import { InstallPanel } from "@/features/setup/InstallPanel";
+import { ConsoleTab } from "@/features/console/ConsoleTab";
+import { RunControls } from "@/features/console/RunControls";
 import { CloneDialog, DeleteDialog, LocateBanner, RenameDialog } from "./dialogs";
 import { PlaceholderTab } from "./tabs/PlaceholderTab";
 import { SettingsTab } from "./tabs/SettingsTab";
@@ -39,7 +39,6 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
   const [renaming, setRenaming] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const forceStop = useForceStopInstance();
 
   const missing = instance.status === "missing";
 
@@ -62,16 +61,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
         </div>
 
         <div className="flex items-center gap-2">
-          {instance.status === "unmanaged" ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={forceStop.isPending}
-              onClick={() => forceStop.mutate(instance.id)}
-            >
-              <Square /> Force stop
-            </Button>
-          ) : null}
+          <RunControls instance={instance} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" aria-label="Instance actions">
@@ -122,22 +112,15 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
           ))}
         </TabsList>
 
-        <TabsContent value="console">
+        <TabsContent value="console" className="min-h-0">
           {missing ? (
             <PlaceholderTab
               title="Console"
-              phase={3}
+              phase={4}
               description="Locate the instance folder to work with this server again."
             />
           ) : (
-            <div className="grid gap-4">
-              <InstallPanel instance={instance} />
-              <PlaceholderTab
-                title="Console"
-                phase={3}
-                description="Live stdout and stderr, a command input with history, autoscroll, search and copy."
-              />
-            </div>
+            <ConsoleTab instance={instance} />
           )}
         </TabsContent>
         <TabsContent value="mods">

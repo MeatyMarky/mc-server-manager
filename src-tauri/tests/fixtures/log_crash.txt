@@ -1,0 +1,10 @@
+[14:10:00] [Server thread/INFO]: Starting minecraft server version 1.21.4
+[14:10:03] [Server thread/INFO]: Preparing level "world"
+[14:10:31] [Server thread/ERROR]: Exception in server tick loop
+java.lang.OutOfMemoryError: Java heap space
+	at net.minecraft.world.level.chunk.LevelChunk.<init>(LevelChunk.java:132)
+	at net.minecraft.server.level.ServerChunkCache.tick(ServerChunkCache.java:410)
+	at net.minecraft.server.MinecraftServer.tickServer(MinecraftServer.java:912)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+[14:10:32] [Server thread/ERROR]: This crash report has been saved to: ./crash-reports/crash-2026-08-18_14.10.32-server.txt
+[14:10:32] [Server thread/INFO]: Stopping server

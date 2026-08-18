@@ -9,6 +9,8 @@ import type {
   EulaStatus,
   JavaRuntime,
   JavaStatus,
+  ParsedLine,
+  StopStage,
   ServerType,
   VersionEntry,
   CloneInstanceInput,
@@ -92,4 +94,18 @@ export const ipc = {
   javaStatus: (id: number) => invoke<JavaStatus>("java_status", { id }),
   javaRequiredFor: (mcVersion: string) =>
     invoke<number>("java_required_for", { mcVersion }),
+
+  // Phase 3: process control.
+  instanceStart: (id: number) => invoke<InstanceView>("instance_start", { id }),
+  /** Resolves with how far the stop had to go: graceful, terminated or killed. */
+  instanceStop: (id: number) => invoke<StopStage>("instance_stop", { id }),
+  instanceKill: (id: number) => invoke<StopStage>("instance_kill", { id }),
+  instanceRestart: (id: number) => invoke<InstanceView>("instance_restart", { id }),
+  instanceSendCommand: (id: number, command: string) =>
+    invoke<void>("instance_send_command", { id, command }),
+  consoleTail: (id: number, count?: number) =>
+    invoke<ParsedLine[]>("console_tail", { id, count }),
+  commandHistory: (id: number) => invoke<string[]>("command_history", { id }),
+  /** null when the port is free; otherwise a sentence naming the conflict. */
+  portStatus: (id: number) => invoke<string | null>("port_status", { id }),
 };

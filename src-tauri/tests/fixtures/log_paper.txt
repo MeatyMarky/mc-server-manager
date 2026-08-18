@@ -1,0 +1,17 @@
+[12:40:01 INFO]: Starting minecraft server version 1.21.4
+[12:40:01 INFO]: Loading properties
+[12:40:01 INFO]: This server is running Paper version 1.21.4-232-main@12d8fe0 (2025-06-09T10:18:55Z) (Implementing API version 1.21.4-R0.1-SNAPSHOT)
+[12:40:02 WARN]: The server will make no attempt to authenticate usernames. Beware.
+[12:40:03 INFO]: Preparing level "world"
+[12:40:06 INFO]: Preparing spawn area: 83%
+[12:40:07 INFO]: Done (6.104s)! For help, type "help"
+[12:40:07 INFO]: Timings Reset
+[12:41:12 INFO]: UUID of player Herobrine is 1f2e3d4c-5b6a-7988-9a0b-1c2d3e4f5061
+[12:41:12 INFO]: Herobrine[/192.168.1.20:51222] logged in with entity id 40 at ([world]0.5, 72.0, 0.5)
+[12:41:12 INFO]: Herobrine joined the game
+[12:44:30 INFO]: Herobrine lost connection: Disconnected
+[12:44:30 INFO]: Herobrine left the game
+[12:45:00 INFO]: Stopping the server
+[12:45:00 INFO]: Saving players
+[12:45:01 INFO]: Saved the game
+[12:45:01 INFO]: Flushing Chunk IO

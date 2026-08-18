@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 use ts_rs::TS;
 
 use crate::db::models::InstanceStatus;
+use crate::logparse::ParsedLine;
 
 /// The instance list changed (created, cloned, renamed, deleted, imported).
 pub const INSTANCES_CHANGED: &str = "instances://changed";
@@ -16,6 +17,10 @@ pub const INSTANCES_CHANGED: &str = "instances://changed";
 pub const INSTANCE_STATUS: &str = "instance://status";
 /// The user asked to quit while servers are still alive.
 pub const QUIT_REQUESTED: &str = "app://quit-requested";
+/// A batch of console lines from one instance.
+pub const INSTANCE_CONSOLE: &str = "instance://console";
+/// A player joined or left.
+pub const INSTANCE_PLAYER: &str = "instance://player";
 /// A long-running task moved forward.
 pub const TASK_PROGRESS: &str = "task://progress";
 /// A long-running task finished, succeeded, failed or was cancelled.
@@ -29,6 +34,27 @@ pub struct InstanceStatusEvent {
     pub status: InstanceStatus,
     #[ts(type = "number | null")]
     pub exit_code: Option<i64>,
+}
+
+/// Console output, batched: one event carries up to a few hundred lines so a
+/// server generating chunks cannot flood the IPC bridge.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct ConsoleEvent {
+    pub uuid: String,
+    pub lines: Vec<ParsedLine>,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct PlayerEvent {
+    pub uuid: String,
+    /// "join" or "leave".
+    pub event: String,
+    pub player: String,
+    pub player_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -95,6 +121,33 @@ pub fn instance_status(app: &AppHandle, uuid: &str, status: InstanceStatus, exit
             uuid: uuid.to_string(),
             status,
             exit_code,
+        },
+    );
+}
+
+pub fn console_lines(app: &AppHandle, uuid: &str, lines: Vec<ParsedLine>) {
+    if lines.is_empty() {
+        return;
+    }
+    emit(
+        app,
+        INSTANCE_CONSOLE,
+        ConsoleEvent {
+            uuid: uuid.to_string(),
+            lines,
+        },
+    );
+}
+
+pub fn player(app: &AppHandle, uuid: &str, event: &str, player: &str, player_uuid: Option<&str>) {
+    emit(
+        app,
+        INSTANCE_PLAYER,
+        PlayerEvent {
+            uuid: uuid.to_string(),
+            event: event.to_string(),
+            player: player.to_string(),
+            player_uuid: player_uuid.map(str::to_string),
         },
     );
 }

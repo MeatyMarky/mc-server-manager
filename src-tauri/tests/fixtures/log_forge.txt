@@ -1,0 +1,14 @@
+2026-08-18 12:50:00,101 main WARN Advanced terminal features are not available in this environment
+[12:50:01] [main/INFO] [cpw.mods.modlauncher.Launcher/MODLAUNCHER]: ModLauncher running: args [--gameDir, ., --launchTarget, forge_server]
+[12:50:02] [main/INFO] [net.minecraftforge.fml.loading.ImmediateWindowHandler/CORE]: Loading ImmediateWindowProvider
+[12:50:05] [main/INFO] [net.minecraftforge.fml.loading.moddiscovery.ModFileInfo/LOADING]: Found 4 mod files
+[12:50:09] [Server thread/INFO] [minecraft/DedicatedServer]: Starting minecraft server version 1.21.4
+[12:50:09] [Server thread/INFO] [minecraft/DedicatedServer]: Loading properties
+[12:50:12] [Server thread/INFO] [minecraft/MinecraftServer]: Preparing level "world"
+[12:50:20] [Server thread/WARN] [minecraft/MinecraftServer]: Can't keep up! Is the server overloaded? Running 2814ms or 56 ticks behind
+[12:50:21] [Server thread/INFO] [minecraft/DedicatedServer]: Done (12.882s)! For help, type "help"
+[12:51:30] [User Authenticator #1/INFO] [minecraft/ServerLoginPacketListenerImpl]: UUID of player Dinnerbone is 2f1e0d9c-8b7a-6554-4332-2110ffeeddcc
+[12:51:30] [Server thread/INFO] [minecraft/PlayerList]: Dinnerbone joined the game
+[12:52:44] [Server thread/INFO] [minecraft/PlayerList]: Dinnerbone left the game
+[12:53:00] [Server thread/INFO] [minecraft/MinecraftServer]: Stopping the server
+[12:53:01] [Server thread/INFO] [minecraft/MinecraftServer]: Saved the game

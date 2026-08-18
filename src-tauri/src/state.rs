@@ -6,6 +6,7 @@ use sqlx::SqlitePool;
 
 use crate::db::models::{Instance, InstanceStatus, InstanceView};
 use crate::http::Http;
+use crate::process::supervisor::Supervisor;
 use crate::tasks::TaskRegistry;
 
 /// Shared backend state. Runtime status lives here and only here — it is never
@@ -18,6 +19,8 @@ pub struct AppState {
     pub http: Http,
     /// Cancellation tokens for downloads and installs.
     pub tasks: TaskRegistry,
+    /// Running servers and their console history.
+    pub supervisor: Supervisor,
     statuses: RwLock<HashMap<String, InstanceStatus>>,
 }
 
@@ -33,6 +36,7 @@ impl AppState {
                 Http::default_client()
             }),
             tasks: TaskRegistry::default(),
+            supervisor: Supervisor::default(),
             statuses: RwLock::new(HashMap::new()),
         }
     }

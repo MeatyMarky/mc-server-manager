@@ -2,7 +2,9 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
+  ConsoleEvent,
   InstanceStatusEvent,
+  PlayerEvent,
   QuitRequestedEvent,
   TaskDoneEvent,
   TaskProgressEvent,
@@ -12,6 +14,8 @@ export const EVENTS = {
   instancesChanged: "instances://changed",
   instanceStatus: "instance://status",
   quitRequested: "app://quit-requested",
+  console: "instance://console",
+  player: "instance://player",
   taskProgress: "task://progress",
   taskDone: "task://done",
 } as const;
@@ -44,4 +48,12 @@ export function onTaskProgress(
 
 export function onTaskDone(handler: (payload: TaskDoneEvent) => void): Promise<UnlistenFn> {
   return listen<TaskDoneEvent>(EVENTS.taskDone, (event) => handler(event.payload));
+}
+
+export function onConsoleLines(handler: (payload: ConsoleEvent) => void): Promise<UnlistenFn> {
+  return listen<ConsoleEvent>(EVENTS.console, (event) => handler(event.payload));
+}
+
+export function onPlayerEvent(handler: (payload: PlayerEvent) => void): Promise<UnlistenFn> {
+  return listen<PlayerEvent>(EVENTS.player, (event) => handler(event.payload));
 }

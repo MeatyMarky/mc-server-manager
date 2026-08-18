@@ -310,3 +310,123 @@ async fn install_updates_the_instance_row() {
     let reloaded = instance::get(&state.db, inst.id).await.unwrap();
     assert_eq!(reloaded.mc_version, "1.21.4");
 }
+
+/// A real Paper server, started with the launch plan this app builds: it must
+/// reach "Done", answer a command on stdin, and stop cleanly when told to.
+///
+/// The supervisor itself needs a Tauri `AppHandle` to emit events, so this test
+/// drives the same launch plan directly and checks the behaviour the supervisor
+/// depends on: the argv is right, the output parses, stdin is accepted, and
+/// `stop` ends the process.
+#[tokio::test]
+#[ignore = "downloads Paper and runs a real server"]
+async fn a_real_server_starts_answers_and_stops() {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    use mc_server_manager_lib::logparse::{self, LogEvent};
+    use mc_server_manager_lib::process::console::ConsoleBuffer;
+    use mc_server_manager_lib::process::launch;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let state = state_in(&root).await;
+    mc_server_manager_lib::java::rescan(&state.db).await.unwrap();
+
+    let inst = instance_in(&state, &root, "paper", ServerType::Paper, "1.21.4").await;
+    let cancel = CancellationToken::new();
+    install::install(&state, &state.http, &inst, "1.21.4", None, &cancel, |_, _, _, _| {})
+        .await
+        .expect("install paper");
+
+    // The EULA is written only through the explicit acceptance path.
+    mc_server_manager_lib::instance::eula::set(&state, inst.id, true)
+        .await
+        .expect("accept eula");
+
+    // Keep the test off the default port and small.
+    std::fs::write(
+        inst.path_buf().join("server.properties"),
+        "server-port=25599
+max-players=1
+online-mode=false
+view-distance=4
+".as_bytes(),
+    )
+    .unwrap();
+
+    let reloaded = instance::get(&state.db, inst.id).await.unwrap();
+    let java = mc_server_manager_lib::java::best_for(&state.db, 21)
+        .await
+        .unwrap()
+        .expect("a Java 21+ runtime");
+    let plan = launch::plan(&reloaded, std::path::Path::new(&java.path)).expect("launch plan");
+    println!("launching: {:?} {:?}", plan.program, plan.args);
+
+    let mut child = tokio::process::Command::new(&plan.program)
+        .args(&plan.args)
+        .current_dir(&plan.working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the server");
+
+    let pid = child.id().expect("pid");
+    assert!(
+        mc_server_manager_lib::process::supervisor::process_start_time(pid).is_some(),
+        "the pid must be observable, which is what reconciliation relies on"
+    );
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut lines = BufReader::new(stdout).lines();
+    let mut buffer = ConsoleBuffer::new();
+
+    let mut ready = false;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(180);
+    while tokio::time::Instant::now() < deadline {
+        let Ok(Some(raw)) = tokio::time::timeout(std::time::Duration::from_secs(30), lines.next_line())
+            .await
+            .unwrap_or(Ok(None))
+        else {
+            break;
+        };
+
+        let parsed = buffer.push(&raw, false);
+        if let Some(LogEvent::Ready { took }) = logparse::detect_event(&parsed.message) {
+            println!("server ready in {took:?} after {} lines", buffer.total_seen());
+            ready = true;
+            break;
+        }
+    }
+    assert!(ready, "the server never reported being ready");
+
+    // A command on stdin, then a graceful stop.
+    stdin.write_all(b"say hello from the manager\n").await.unwrap();
+    stdin.flush().await.unwrap();
+    stdin.write_all(b"stop\n").await.unwrap();
+    stdin.flush().await.unwrap();
+
+    let mut saw_stopping = false;
+    while let Ok(Some(raw)) = lines.next_line().await {
+        let parsed = buffer.push(&raw, false);
+        if matches!(logparse::detect_event(&parsed.message), Some(LogEvent::Stopping)) {
+            saw_stopping = true;
+        }
+    }
+
+    let status = tokio::time::timeout(std::time::Duration::from_secs(60), child.wait())
+        .await
+        .expect("the server exited within a minute")
+        .expect("wait");
+
+    assert!(saw_stopping, "the shutdown was never announced");
+    assert_eq!(status.code(), Some(0), "a stop command exits cleanly");
+    assert_eq!(
+        mc_server_manager_lib::process::supervisor::process_start_time(pid),
+        None,
+        "the pid is gone once the server exits"
+    );
+    println!("captured {} console lines", buffer.total_seen());
+}
