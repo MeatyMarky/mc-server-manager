@@ -101,9 +101,21 @@ script launch resolves neither: it runs `java` from `PATH` with the heap in
 `user_jvm_args.txt`, so both are read (`detect::java_on_path`, `launch::script_heap_mb`) and
 checked the same way.
 
-Every launch attempt logs the resolved binary, its recorded width, the effective heap and
-how it was chosen — at info level and into the instance console. Without that line, a JVM
-that refuses to start looks like the app misbehaving.
+### The spawned command line is logged verbatim, before anything else
+`launch::quoted_command` renders the program and every argument quoted, with control
+characters escaped, and that line goes to the log at info level and into the instance
+console before the process is spawned — along with the resolved binary, its recorded width
+and the effective heap. A JVM's own complaint names a flag but never what was passed to it,
+and `-Xmx8192M` and `-Xmx8192M` look identical in a console, so this is the first thing
+to read when a start fails.
+
+`launch::validate_args` then refuses a command line the JVM would only reject after
+spawning: a heap flag that is not digits plus an optional unit, or more than one `-Xmx`.
+The RAM fields and a custom `-Xmx` no longer both reach the command line — a custom flag
+replaces the generated one in `heap_args_resolved`, so exactly one setting exists and it is
+the one the user set. Arguments read out of a file go through `launch::args_file_tokens`,
+which trims carriage returns and blank lines, because the Forge and NeoForge installers
+write those files with CRLF endings.
 
 ### A start that never finished is not a crash
 Auto-restart exists for a server that was running and died. A process that exits before the

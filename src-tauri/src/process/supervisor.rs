@@ -338,13 +338,24 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
     let java = preflight(state, &instance).await?;
     let plan = launch::plan(&instance, &java)?;
 
+    // The exact command line, before anything else happens with it. Every token
+    // is quoted and escaped, so a stray carriage return or a doubled flag is
+    // visible rather than implied — the JVM's own complaints name a flag but
+    // never say what was actually passed to it.
+    let command_line = launch::quoted_command(&plan.program, &plan.args);
+    tracing::info!(
+        instance = %instance.name,
+        argv = %command_line,
+        working_dir = %plan.working_dir.display(),
+        "spawning server process"
+    );
+
+    // Refuse a command line the JVM would only reject after it starts.
+    launch::validate_args(&plan.args)?;
+
     let console = state.supervisor.console(&instance.uuid);
     if let Ok(mut buffer) = console.lock() {
-        buffer.push_system(&format!(
-            "Starting {} with {}",
-            instance.name,
-            plan.program.display()
-        ));
+        buffer.push_system(&format!("Command: {command_line}"));
     }
 
     let mut command = tokio::process::Command::new(&plan.program);

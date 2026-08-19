@@ -31,6 +31,93 @@ pub fn heap_args(min_ram_mb: i64, max_ram_mb: i64) -> Vec<String> {
     vec![format!("-Xms{min}M"), format!("-Xmx{max}M")]
 }
 
+/// Renders one argument for a log line: quoted, with control characters and
+/// trailing whitespace made visible.
+///
+/// A `-Xmx8192M\r` and a `-Xmx8192M` are the same width on screen and behave
+/// very differently, so the log has to show the difference rather than imply it.
+pub fn quote_arg(arg: &str) -> String {
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    for ch in arg.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if (ch as u32) < 0x20 || ch as u32 == 0x7f => {
+                out.push_str(&format!("\\u{{{:04x}}}", ch as u32))
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The whole command line as one loggable string, every token quoted.
+pub fn quoted_command(program: &Path, args: &[String]) -> String {
+    let mut parts = vec![quote_arg(&program.to_string_lossy())];
+    parts.extend(args.iter().map(|arg| quote_arg(arg)));
+    parts.join(" ")
+}
+
+/// `-Xmx` / `-Xms` exactly as the JVM will accept them: the flag, digits, and an
+/// optional single-letter unit. Nothing else — no trailing whitespace, no second
+/// value glued on, no stray carriage return.
+pub fn heap_flag_is_well_formed(arg: &str) -> bool {
+    let Some(value) = arg
+        .strip_prefix("-Xmx")
+        .or_else(|| arg.strip_prefix("-Xms"))
+    else {
+        return true; // not a heap flag; nothing to say about it
+    };
+
+    let (digits, unit) = value.split_at(
+        value
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(value.len()),
+    );
+    if digits.is_empty() || digits.parse::<u64>().is_err() {
+        return false;
+    }
+    matches!(unit, "" | "k" | "K" | "m" | "M" | "g" | "G" | "t" | "T")
+}
+
+/// Rejects a command line the JVM would only complain about after spawning.
+///
+/// The JVM's own message names the flag but not where it came from, and a
+/// malformed one is invisible in a console: `-Xmx8192M ` and `-Xmx8192M` look
+/// identical. Checking here means the error can quote the exact token.
+pub fn validate_args(args: &[String]) -> AppResult<()> {
+    for arg in args {
+        if !heap_flag_is_well_formed(arg) {
+            return Err(AppError::Other(format!(
+                "the memory setting {} is not a value the JVM accepts; \
+                 check this server's JVM arguments",
+                quote_arg(arg)
+            )));
+        }
+    }
+
+    // Two heap maxima on one command line is legal — the JVM takes the last —
+    // but it means two settings disagree, and the one that wins is not the one
+    // the user is looking at. Resolved in `plan`; this catches a regression.
+    let maxima = args.iter().filter(|arg| arg.starts_with("-Xmx")).count();
+    if maxima > 1 {
+        return Err(AppError::Other(format!(
+            "the launch command sets the maximum heap {maxima} times: {}",
+            args.iter()
+                .filter(|arg| arg.starts_with("-Xmx"))
+                .map(|arg| quote_arg(arg))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    Ok(())
+}
+
 /// The heap this instance will really run with, in MB, resolved the same way
 /// `plan` builds the command line.
 ///
@@ -48,13 +135,27 @@ pub fn effective_heap_mb(instance: &Instance) -> Option<i64> {
 /// this is the only place a script's heap can come from.
 pub fn script_heap_mb(instance_dir: &Path) -> Option<i64> {
     let text = std::fs::read_to_string(instance_dir.join("user_jvm_args.txt")).ok()?;
-    text.lines()
-        .map(|line| line.trim())
-        .filter(|line| !line.starts_with('#'))
-        .flat_map(|line| line.split_whitespace())
-        .filter_map(parse_xmx)
+    args_file_tokens(&text)
+        .iter()
+        .filter_map(|arg| parse_xmx(arg))
         .next_back()
         .map(|bytes| (bytes / (1024 * 1024)) as i64)
+}
+
+/// Every argument in a JVM arguments file, cleaned.
+///
+/// These files ship with CRLF endings from the Forge and NeoForge installers and
+/// are edited by hand on both platforms, so each token is trimmed of carriage
+/// returns and surrounding whitespace. A `-Xmx8G\r` reaching a command line
+/// fails with a message that shows no sign of the stray character.
+pub fn args_file_tokens(text: &str) -> Vec<String> {
+    text.lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .flat_map(|line| line.split_whitespace())
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+        .collect()
 }
 
 /// The heap the JVM will actually be given, in bytes.
@@ -86,6 +187,26 @@ fn parse_xmx(arg: &str) -> Option<u64> {
         _ => return None,
     };
     amount.checked_mul(scale)
+}
+
+fn is_heap_flag(arg: &str) -> bool {
+    arg.starts_with("-Xmx") || arg.starts_with("-Xms")
+}
+
+/// The heap flags for the command line, with the custom arguments folded in.
+///
+/// A custom `-Xmx`/`-Xms` replaces the generated one instead of being appended
+/// after it, so the command line carries exactly one of each and it is the one
+/// the user set.
+pub fn heap_args_resolved(min_ram_mb: i64, max_ram_mb: i64, custom: &[String]) -> Vec<String> {
+    let custom_min = custom.iter().rev().find(|arg| arg.starts_with("-Xms"));
+    let custom_max = custom.iter().rev().find(|arg| arg.starts_with("-Xmx"));
+
+    let generated = heap_args(min_ram_mb, max_ram_mb);
+    vec![
+        custom_min.cloned().unwrap_or_else(|| generated[0].clone()),
+        custom_max.cloned().unwrap_or_else(|| generated[1].clone()),
+    ]
 }
 
 fn decode_list(raw: &str) -> Vec<String> {
@@ -138,8 +259,13 @@ pub fn plan(instance: &Instance, java: &Path) -> AppResult<LaunchPlan> {
                 )));
             }
 
-            let mut args = heap_args(instance.min_ram_mb, instance.max_ram_mb);
-            args.extend(decode_list(&instance.jvm_args));
+            // The RAM fields and a custom -Xmx would otherwise both land on the
+            // command line, leaving two settings where the winner is whichever
+            // the JVM read last. One flag is emitted, and the custom one wins
+            // because that is the existing behaviour people rely on.
+            let custom = decode_list(&instance.jvm_args);
+            let mut args = heap_args_resolved(instance.min_ram_mb, instance.max_ram_mb, &custom);
+            args.extend(custom.iter().filter(|arg| !is_heap_flag(arg)).cloned());
 
             if instance.launch_kind == LaunchKind::Jar {
                 let jar = working_dir.join(&target);
@@ -381,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn a_custom_xmx_wins_because_the_plan_appends_it_after_the_ram_fields() {
+    fn a_custom_xmx_replaces_the_ram_field_rather_than_joining_it() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("server.jar"), b"jar").unwrap();
         let mut instance = instance(LaunchKind::Jar, "server.jar", dir.path());
@@ -391,9 +517,106 @@ mod tests {
         assert_eq!(effective_heap_mb(&instance), Some(6144));
 
         let plan = plan(&instance, Path::new("/jdk/bin/java")).unwrap();
-        let generated = plan.args.iter().position(|a| a == "-Xmx1024M").unwrap();
-        let custom = plan.args.iter().position(|a| a == "-Xmx6G").unwrap();
-        assert!(custom > generated, "the JVM reads the last one: {:?}", plan.args);
+        let maxima: Vec<&String> = plan
+            .args
+            .iter()
+            .filter(|arg| arg.starts_with("-Xmx"))
+            .collect();
+        assert_eq!(
+            maxima,
+            vec!["-Xmx6G"],
+            "one maximum on the command line, and it is the one the user set: {:?}",
+            plan.args
+        );
+        assert!(validate_args(&plan.args).is_ok());
+    }
+
+    #[test]
+    fn a_custom_xms_replaces_the_generated_one_too() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("server.jar"), b"jar").unwrap();
+        let mut instance = instance(LaunchKind::Jar, "server.jar", dir.path());
+        instance.jvm_args = r#"["-Xms512M","-XX:+UseG1GC"]"#.into();
+
+        let plan = plan(&instance, Path::new("/jdk/bin/java")).unwrap();
+        let minima: Vec<&String> = plan
+            .args
+            .iter()
+            .filter(|arg| arg.starts_with("-Xms"))
+            .collect();
+        assert_eq!(minima, vec!["-Xms512M"], "{:?}", plan.args);
+        // Everything that is not a heap flag survives untouched.
+        assert!(plan.args.contains(&"-XX:+UseG1GC".to_string()));
+    }
+
+    #[test]
+    fn an_args_file_with_crlf_endings_produces_clean_tokens() {
+        // What the Forge and NeoForge installers write on Windows.
+        let text = "# Xmx and Xms set the maximum and minimum RAM usage\r\n\r\n-Xmx8G\r\n-XX:+UseG1GC\r\n";
+        let tokens = args_file_tokens(text);
+
+        assert_eq!(tokens, vec!["-Xmx8G", "-XX:+UseG1GC"]);
+        for token in &tokens {
+            assert!(!token.contains('\r'), "{token:?} still carries a carriage return");
+            assert_eq!(token.trim(), token, "{token:?} has stray whitespace");
+            assert!(heap_flag_is_well_formed(token), "{token:?}");
+        }
+
+        // And the heap read out of such a file is the plain number.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("user_jvm_args.txt"), text.as_bytes()).unwrap();
+        assert_eq!(script_heap_mb(dir.path()), Some(8192));
+    }
+
+    #[test]
+    fn a_heap_flag_is_checked_against_what_the_jvm_accepts() {
+        assert!(heap_flag_is_well_formed("-Xmx8192M"));
+        assert!(heap_flag_is_well_formed("-Xms1024M"));
+        assert!(heap_flag_is_well_formed("-Xmx8G"));
+        assert!(heap_flag_is_well_formed("-Xmx8192"));
+        assert!(heap_flag_is_well_formed("-XX:+UseG1GC"), "not a heap flag");
+
+        // The shapes that would reach the JVM invisibly.
+        assert!(!heap_flag_is_well_formed("-Xmx8192M\r"));
+        assert!(!heap_flag_is_well_formed("-Xmx8192M "));
+        assert!(!heap_flag_is_well_formed("-Xmx8192M8192M"));
+        assert!(!heap_flag_is_well_formed("-Xmx8192MB"));
+        assert!(!heap_flag_is_well_formed("-Xmx"));
+        assert!(!heap_flag_is_well_formed("-XmxG"));
+    }
+
+    #[test]
+    fn a_malformed_or_doubled_heap_flag_is_refused_before_spawning() {
+        let err = validate_args(&["-Xmx8192M\r".to_string()]).unwrap_err();
+        // The escape makes the stray character visible in the message itself.
+        assert!(err.to_string().contains("\\r"), "{err}");
+
+        let err = validate_args(&[
+            "-Xmx1024M".to_string(),
+            "-Xmx8G".to_string(),
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("2 times"), "{err}");
+
+        assert!(validate_args(&["-Xms1024M".into(), "-Xmx4096M".into()]).is_ok());
+    }
+
+    #[test]
+    fn arguments_are_logged_so_whitespace_and_control_characters_show() {
+        assert_eq!(quote_arg("-Xmx8192M"), "\"-Xmx8192M\"");
+        assert_eq!(quote_arg("-Xmx8192M\r"), "\"-Xmx8192M\\r\"");
+        assert_eq!(quote_arg("-Xmx8192M "), "\"-Xmx8192M \"");
+        assert_eq!(quote_arg("a\tb"), "\"a\\tb\"");
+        assert_eq!(quote_arg("say \"hi\""), "\"say \\\"hi\\\"\"");
+
+        let line = quoted_command(
+            Path::new("C:/Program Files/Java/jdk-26/bin/java.exe"),
+            &["-Xmx8192M".to_string(), "-jar".to_string(), "server.jar".to_string()],
+        );
+        assert_eq!(
+            line,
+            "\"C:/Program Files/Java/jdk-26/bin/java.exe\" \"-Xmx8192M\" \"-jar\" \"server.jar\""
+        );
     }
 
     #[test]

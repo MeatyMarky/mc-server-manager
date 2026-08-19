@@ -952,3 +952,87 @@ async fn run_server_until_ready(
     let _ = tokio::time::timeout(std::time::Duration::from_secs(60), child.wait()).await;
     transcript
 }
+
+/// Reproduction harness: builds the launch command for a real instance folder on
+/// this machine and prints it, then runs the JVM with those exact arguments.
+///
+/// Kept ignored like the rest of this file. It exists because "which arguments
+/// did it actually spawn" was guessed at three times before anybody printed it.
+#[tokio::test]
+#[ignore = "reads a folder on the developer's machine"]
+async fn the_real_instance_on_this_machine_produces_a_command_that_runs() {
+    use mc_server_manager_lib::db::models::{Instance, LaunchKind};
+    use mc_server_manager_lib::process::launch;
+
+    // Point this at any instance folder: `MSM_REPRO_INSTANCE=... cargo test ...`.
+    let Ok(folder) = std::env::var("MSM_REPRO_INSTANCE") else {
+        println!("set MSM_REPRO_INSTANCE to an instance folder to run this");
+        return;
+    };
+    let dir = PathBuf::from(&folder);
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join(".msm").join("instance.json")).expect("instance.json"),
+    )
+    .expect("valid manifest");
+
+    let dir_for_state = tempfile::tempdir().unwrap();
+    let state = state_in(dir_for_state.path()).await;
+    let now = mc_server_manager_lib::db::now_rfc3339();
+    sqlx::query(
+        "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+            launch_target, jvm_args, server_args, min_ram_mb, max_ram_mb, eula_accepted,
+            installed_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'fabric', ?, 'jar', ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+    )
+    .bind(manifest["uuid"].as_str().unwrap())
+    .bind(manifest["name"].as_str().unwrap())
+    .bind(&folder)
+    .bind(manifest["mcVersion"].as_str().unwrap())
+    .bind(manifest["launchTarget"].as_str().unwrap())
+    .bind(manifest["jvmArgs"].to_string())
+    .bind(manifest["serverArgs"].to_string())
+    .bind(manifest["minRamMb"].as_i64().unwrap())
+    .bind(manifest["maxRamMb"].as_i64().unwrap())
+    .bind(&now)
+    .bind(&now)
+    .bind(&now)
+    .execute(&state.db)
+    .await
+    .unwrap();
+
+    let row: Instance = instance::get(&state.db, 1).await.unwrap();
+    assert_eq!(row.launch_kind, LaunchKind::Jar);
+
+    mc_server_manager_lib::java::rescan(&state.db).await.unwrap();
+    let required = row
+        .java_major
+        .unwrap_or_else(|| mc_server_manager_lib::java::required_java_for(&row.mc_version));
+    let chosen = mc_server_manager_lib::java::best_for(&state.db, required)
+        .await
+        .unwrap()
+        .expect("a usable runtime");
+    println!("required Java {required}, chose {} (bits {:?})", chosen.path, chosen.bits);
+
+    let plan = launch::plan(&row, Path::new(&chosen.path)).expect("plan");
+    println!("argv: {}", launch::quoted_command(&plan.program, &plan.args));
+    launch::validate_args(&plan.args).expect("the command line is well formed");
+
+    // The real thing: run that JVM with those arguments, up to -version.
+    let mut args = plan.args.clone();
+    args.truncate(args.iter().position(|a| a == "-jar").unwrap_or(args.len()));
+    args.push("-version".to_string());
+    let output = std::process::Command::new(&plan.program)
+        .args(&args)
+        .output()
+        .expect("run the JVM");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    println!("{text}");
+    assert!(
+        !text.contains("Invalid maximum heap size"),
+        "the chosen JVM refuses this command line"
+    );
+}
