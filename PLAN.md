@@ -387,6 +387,16 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
 - Non-distributable CurseForge projects are shown with an explanation and a link, never a
   failure at install time.
 
+### Phase 9 — Modpack browsing, server-only  ✅
+- A "Browse packs" entry beside the instance list, not inside an instance: installing a pack
+  creates the server.
+- Server-suitability decided by the source's `server_side` where published, and otherwise by
+  reading the pack index — loader plus at least one file not `unsupported` on the server.
+  A pack with no server build says which reason applies and cannot be installed.
+- Installing creates the instance with the pack's loader and Minecraft version, installs the
+  server, then applies the pack through the existing `env`-aware, staged importer.
+- RAM pre-filled from what the pack asks for, or a suggestion sized to it.
+
 ## 5. Cross-platform rules (enforced from Phase 1)
 
 - Every path built with `PathBuf` / `Path::join`; no `/` or `\` literals; no `to_str().unwrap()`.

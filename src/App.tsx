@@ -1,4 +1,4 @@
-import { HelpCircle, Info, Moon, Sun } from "lucide-react";
+import { Boxes, HelpCircle, Info, Moon, Sun } from "lucide-react";
 import { useEffect } from "react";
 import { Toaster } from "sonner";
 
@@ -11,6 +11,7 @@ import { InstanceDetail } from "@/features/instance/InstanceDetail";
 import { CreateInstanceDialog } from "@/features/instances/CreateInstanceDialog";
 import { ImportInstanceDialog } from "@/features/instances/ImportInstanceDialog";
 import { InstanceSidebar } from "@/features/instances/InstanceSidebar";
+import { PackBrowser } from "@/features/packs/PackBrowser";
 import { useInstanceEvents, useInstances } from "@/features/instances/queries";
 import { ipc } from "@/lib/ipc";
 import { applyTheme, useUiStore, type Theme } from "@/stores/ui";
@@ -22,6 +23,9 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [about, setAbout] = useState(false);
+  // Packs are browsed on their own: installing one creates a server, so it
+  // belongs beside the instance list rather than inside an instance.
+  const [browsingPacks, setBrowsingPacks] = useState(false);
   const [reporting, setReporting] = useState(false);
 
   useInstanceEvents();
@@ -63,7 +67,15 @@ export default function App() {
       />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex justify-end gap-1 px-6 pt-4">
+        <div className="flex items-center justify-end gap-1 px-6 pt-4">
+          <Button
+            variant={browsingPacks ? "default" : "ghost"}
+            size="sm"
+            className="mr-auto"
+            onClick={() => setBrowsingPacks((current) => !current)}
+          >
+            <Boxes /> Browse packs
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -92,7 +104,14 @@ export default function App() {
           </Button>
         </div>
 
-        {selected ? (
+        {browsingPacks ? (
+          <PackBrowser
+            onInstalled={(instanceId) => {
+              setBrowsingPacks(false);
+              selectInstance(instanceId);
+            }}
+          />
+        ) : selected ? (
           <InstanceDetail key={selected.id} instance={selected} />
         ) : isLoading ? (
           <div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">

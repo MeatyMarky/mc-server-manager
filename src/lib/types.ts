@@ -131,3 +131,8 @@ export type { ContentTypeOption } from "./bindings/ContentTypeOption";
 export type { SearchPage } from "./bindings/SearchPage";
 export type { SortBy } from "./bindings/SortBy";
 export type { SourceStatus } from "./bindings/SourceStatus";
+
+// Phase 9: modpacks, browsed for a server.
+export type { InstallPackInput } from "./bindings/InstallPackInput";
+export type { PackDetail } from "./bindings/PackDetail";
+export type { ServerSupport } from "./bindings/ServerSupport";

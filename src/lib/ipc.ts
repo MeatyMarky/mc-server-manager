@@ -29,7 +29,9 @@ import type {
   Category,
   ContentType,
   ContentTypeOption,
+  InstallPackInput,
   ModView,
+  PackDetail,
   Project,
   ModsView,
   SearchPage,
@@ -227,6 +229,25 @@ export const ipc = {
   /** One project in full: licence, links and the long description. */
   modsProject: (source: SourceId, projectId: string) =>
     invoke<Project>("mods_project", { source, projectId }),
+
+  // Modpacks. Browsed on their own, because installing one creates a server.
+  packsSearch: (args: {
+    source: SourceId;
+    text: string;
+    sort: SortBy;
+    categories: string[];
+    gameVersions: string[];
+    serverOnly: boolean;
+    limit?: number;
+    offset?: number;
+  }) => invoke<SearchPage>("packs_search", args),
+  packVersions: (source: SourceId, projectId: string) =>
+    invoke<SourceVersion[]>("pack_versions", { source, projectId }),
+  /** Reads the pack's index and says whether it has a server build. */
+  packExamine: (source: SourceId, projectId: string, versionId: string) =>
+    invoke<PackDetail>("pack_examine", { source, projectId, versionId }),
+  /** Returns a task id; the new instance's id arrives on task://done. */
+  packInstall: (input: InstallPackInput) => invoke<string>("pack_install", { input }),
   /** Resolves dependencies. Nothing is downloaded until the plan is confirmed. */
   modsPlan: (id: number, source: SourceId, projectId: string, versionId: string | null) =>
     invoke<InstallPlan>("mods_plan", { id, source, projectId, versionId }),

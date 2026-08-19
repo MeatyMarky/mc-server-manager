@@ -14,6 +14,7 @@ pub mod mcversion;
 pub mod providers;
 pub mod metrics;
 pub mod mods;
+pub mod packs;
 pub mod paths;
 pub mod players;
 pub mod process;
@@ -210,6 +211,10 @@ pub fn run() {
             commands::mods::mods_content_types,
             commands::mods::mods_icon,
             commands::mods::mods_project,
+            commands::packs::packs_search,
+            commands::packs::pack_examine,
+            commands::packs::pack_versions,
+            commands::packs::pack_install,
             commands::mods::mods_versions,
             commands::mods::mods_plan,
             commands::mods::mods_install,

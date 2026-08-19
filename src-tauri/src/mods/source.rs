@@ -214,6 +214,9 @@ pub struct Project {
     /// The long description, for the detail panel. Absent on search results:
     /// both sources only return it from the project endpoint.
     pub body: Option<String>,
+    /// What the source says about running this on a server: "required",
+    /// "optional", "unsupported", or nothing when it does not say.
+    pub server_side: Option<String>,
     /// False when the source will not serve the files through its API.
     ///
     /// CurseForge lets an author forbid third-party downloads, and a browser

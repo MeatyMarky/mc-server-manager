@@ -6,6 +6,7 @@ pub mod backups;
 pub mod config;
 pub mod diag;
 pub mod instances;
+pub mod packs;
 pub mod players;
 pub mod runtimes;
 pub mod java;

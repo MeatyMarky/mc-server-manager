@@ -148,6 +148,7 @@ struct Hit {
     categories: Vec<String>,
     date_modified: Option<String>,
     project_type: Option<String>,
+    server_side: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +166,7 @@ struct ApiProject {
     updated: Option<String>,
     project_type: Option<String>,
     body: Option<String>,
+    server_side: Option<String>,
     license: Option<ApiLicense>,
     source_url: Option<String>,
     issues_url: Option<String>,
@@ -229,6 +231,7 @@ fn to_project(hit: Hit) -> Project {
         page_url: Some(format!("https://modrinth.com/{}/{}", page_segment(content_type), hit.slug)),
         updated: hit.date_modified,
         content_type,
+        server_side: hit.server_side,
         // Only the project endpoint carries these; a search hit has none.
         license: None,
         source_url: None,
@@ -323,6 +326,7 @@ fn project_from_api(project: ApiProject) -> Project {
         )),
         updated: project.updated,
         content_type,
+        server_side: project.server_side,
         license: project
             .license
             .and_then(|license| license.name.or(license.id)),
@@ -421,6 +425,14 @@ pub fn search_url(query: &SearchQuery) -> String {
         "project_type",
         &[project_type_of(query.content_type).to_string()],
     ));
+    // Modrinth knows which projects run on a server, so a pack search asks it
+    // rather than downloading packs to find out.
+    if query.content_type == ContentType::Modpack {
+        facets.push(or_facet(
+            "server_side",
+            &["required".to_string(), "optional".to_string()],
+        ));
+    }
 
     let mut url = format!(
         "{API}/search?limit={}&offset={}&index={}",
@@ -791,5 +803,28 @@ mod tests {
 
         let order: Vec<&str> = versions.iter().map(|version| version.id.as_str()).collect();
         assert_eq!(order, vec!["for-26.2", "for-1.21.4", "for-1.20.4"]);
+    }
+
+    #[test]
+    fn a_pack_search_asks_modrinth_for_the_ones_that_run_on_a_server() {
+        let url = search_url(&SearchQuery {
+            content_type: ContentType::Modpack,
+            ..SearchQuery::default()
+        });
+
+        assert!(url.contains("project_type%3Amodpack"), "{url}");
+        // The whole point: the source answers the server question, so nothing
+        // has to be downloaded to find out.
+        assert!(url.contains("server_side%3Arequired"), "{url}");
+        assert!(url.contains("server_side%3Aoptional"), "{url}");
+        assert!(!url.contains("server_side%3Aunsupported"), "{url}");
+    }
+
+    #[test]
+    fn a_mod_search_does_not_carry_the_server_facet() {
+        // A mod that only matters on the client is still worth finding — the
+        // filter belongs to packs, where it decides whether one can be run.
+        let url = search_url(&SearchQuery::default());
+        assert!(!url.contains("server_side"), "{url}");
     }
 }

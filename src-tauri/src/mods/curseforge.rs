@@ -428,8 +428,10 @@ fn to_project(item: ApiMod) -> Project {
         issues_url: links.as_ref().and_then(|links| links.issues_url.clone()),
         wiki_url: links.as_ref().and_then(|links| links.wiki_url.clone()),
         // CurseForge does not publish a licence field; its project pages carry
-        // the terms, which is what the link is for.
+        // the terms, which is what the link is for. Nor does it say whether a
+        // pack runs on a server, so that answer comes from the index.
         license: None,
+        server_side: None,
         body: item.summary_long,
         categories: item
             .categories

@@ -40,6 +40,11 @@ issuesUrl: string | null, wikiUrl: string | null,
  */
 body: string | null, 
 /**
+ * What the source says about running this on a server: "required",
+ * "optional", "unsupported", or nothing when it does not say.
+ */
+serverSide: string | null, 
+/**
  * False when the source will not serve the files through its API.
  *
  * CurseForge lets an author forbid third-party downloads, and a browser

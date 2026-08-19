@@ -309,6 +309,20 @@ are listed and never installed on their own; two versions of one project is a co
 is refused by name. Everything installed is recorded in `mods`/`mod_dependencies` so an
 uninstall can say what depended on it.
 
+### A pack is checked for a server build before it is offered
+Most modpacks are built for a client, and finding that out half way through an install is
+what this check exists to avoid. Two levels of certainty, in order: the source's own answer
+where it has one (Modrinth publishes `server_side`, and a pack search sends that facet), and
+otherwise the pack index itself — a loader this app can run as a server, plus at least one
+file not marked `unsupported` for the server. `packs::examine` downloads the pack to read
+that index, except when the source has already said no. A pack that cannot run says which
+of the two reasons applies, and the install button stays disabled.
+
+Installing a pack **creates** an instance rather than filling one: server type from the
+pack's loader, Minecraft version from its index, RAM from what the pack's own text asks for
+(`published_ram_mb`) or a suggestion sized to the pack, and then the Phase 5 importer
+applies the files with the `env` filtering and the staging it already has.
+
 ### `.mrpack` import
 The `env` field decides what a server gets: a file marked `unsupported` on the server side is
 skipped entirely, because a client-only mod on a server is a guaranteed crash. Download URLs

@@ -344,6 +344,7 @@ mod tests {
                 issues_url: None,
                 wiki_url: None,
                 body: None,
+                server_side: None,
                 content_type: Some(crate::mods::ContentType::Mod),
                 downloadable: true,
                 source: SourceId::Modrinth,

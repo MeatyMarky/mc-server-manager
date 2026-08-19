@@ -32,6 +32,7 @@ function project(overrides: Partial<Project> = {}): Project {
     issuesUrl: null,
     wikiUrl: null,
     body: null,
+    serverSide: "required",
     downloadable: true,
     ...overrides,
   };
