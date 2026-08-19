@@ -278,6 +278,9 @@ struct ApiMod {
     date_modified: Option<String>,
     #[serde(rename = "classId")]
     class_id: Option<i64>,
+    /// The long description, when a detail call returned one.
+    #[serde(rename = "description")]
+    summary_long: Option<String>,
     /// False when the author forbids downloads through the API.
     #[serde(rename = "allowModDistribution")]
     allow_mod_distribution: Option<bool>,
@@ -300,6 +303,12 @@ struct ApiLogo {
 struct ApiLinks {
     #[serde(rename = "websiteUrl")]
     website_url: Option<String>,
+    #[serde(rename = "sourceUrl")]
+    source_url: Option<String>,
+    #[serde(rename = "issuesUrl")]
+    issues_url: Option<String>,
+    #[serde(rename = "wikiUrl")]
+    wiki_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,6 +413,7 @@ fn to_project(item: ApiMod) -> Project {
         _ => None,
     };
 
+    let links = item.links;
     Project {
         source: SourceId::CurseForge,
         id: item.id.to_string(),
@@ -413,7 +423,14 @@ fn to_project(item: ApiMod) -> Project {
         author: item.authors.first().map(|author| author.name.clone()),
         downloads: item.download_count.map(|count| count as i64),
         icon_url: item.logo.and_then(|logo| logo.url),
-        page_url: item.links.and_then(|links| links.website_url),
+        page_url: links.as_ref().and_then(|links| links.website_url.clone()),
+        source_url: links.as_ref().and_then(|links| links.source_url.clone()),
+        issues_url: links.as_ref().and_then(|links| links.issues_url.clone()),
+        wiki_url: links.as_ref().and_then(|links| links.wiki_url.clone()),
+        // CurseForge does not publish a licence field; its project pages carry
+        // the terms, which is what the link is for.
+        license: None,
+        body: item.summary_long,
         categories: item
             .categories
             .into_iter()

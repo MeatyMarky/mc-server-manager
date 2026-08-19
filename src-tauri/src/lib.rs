@@ -209,6 +209,7 @@ pub fn run() {
             commands::mods::mods_categories,
             commands::mods::mods_content_types,
             commands::mods::mods_icon,
+            commands::mods::mods_project,
             commands::mods::mods_versions,
             commands::mods::mods_plan,
             commands::mods::mods_install,

@@ -29,6 +29,8 @@ pub struct PlannedMod {
     /// Where this came from. Two sources are in play, and a file reference from
     /// one is meaningless to the other.
     pub source: SourceId,
+    /// The project's page on that source, for the row this install writes.
+    pub page_url: Option<String>,
     pub project_id: String,
     pub project_title: String,
     pub version_id: String,
@@ -166,15 +168,20 @@ pub async fn plan<S: ModSource>(
             }
         }
 
-        let title = source
-            .project(&version.project_id)
-            .await
-            .map(|project| project.title)
-            .unwrap_or_else(|_| version.project_id.clone());
+        // One lookup for both the display name and the page to record: the row
+        // this install writes links back to where the file came from, and that
+        // is a different site per source.
+        let project = source.project(&version.project_id).await.ok();
+        let title = project
+            .as_ref()
+            .map(|project| project.title.clone())
+            .unwrap_or_else(|| version.project_id.clone());
+        let page_url = project.and_then(|project| project.page_url);
 
         let file = version.primary_file();
         install.push(PlannedMod {
             source: version.source,
+            page_url: page_url.clone(),
             project_id: version.project_id.clone(),
             project_title: title.clone(),
             version_id: version.id.clone(),
@@ -332,6 +339,11 @@ mod tests {
         async fn project(&self, project_id: &str) -> AppResult<Project> {
             Ok(Project {
                 updated: None,
+                license: None,
+                source_url: None,
+                issues_url: None,
+                wiki_url: None,
+                body: None,
                 content_type: Some(crate::mods::ContentType::Mod),
                 downloadable: true,
                 source: SourceId::Modrinth,

@@ -204,6 +204,16 @@ pub struct Project {
     pub updated: Option<String>,
     /// What kind of content this is, when the source says.
     pub content_type: Option<ContentType>,
+    /// The licence the project publishes, when it publishes one.
+    pub license: Option<String>,
+    /// Where the code lives, when the project says.
+    pub source_url: Option<String>,
+    /// Where to report a problem with it.
+    pub issues_url: Option<String>,
+    pub wiki_url: Option<String>,
+    /// The long description, for the detail panel. Absent on search results:
+    /// both sources only return it from the project endpoint.
+    pub body: Option<String>,
     /// False when the source will not serve the files through its API.
     ///
     /// CurseForge lets an author forbid third-party downloads, and a browser

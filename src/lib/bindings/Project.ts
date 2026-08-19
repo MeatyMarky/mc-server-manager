@@ -23,6 +23,23 @@ updated: string | null,
  */
 contentType: ContentType | null, 
 /**
+ * The licence the project publishes, when it publishes one.
+ */
+license: string | null, 
+/**
+ * Where the code lives, when the project says.
+ */
+sourceUrl: string | null, 
+/**
+ * Where to report a problem with it.
+ */
+issuesUrl: string | null, wikiUrl: string | null, 
+/**
+ * The long description, for the detail panel. Absent on search results:
+ * both sources only return it from the project endpoint.
+ */
+body: string | null, 
+/**
  * False when the source will not serve the files through its API.
  *
  * CurseForge lets an author forbid third-party downloads, and a browser

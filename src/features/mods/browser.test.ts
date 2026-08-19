@@ -27,6 +27,11 @@ function project(overrides: Partial<Project> = {}): Project {
     loaders: ["fabric"],
     updated: "2026-08-01T10:00:00Z",
     contentType: "mod",
+    license: "MIT",
+    sourceUrl: null,
+    issuesUrl: null,
+    wikiUrl: null,
+    body: null,
     downloadable: true,
     ...overrides,
   };

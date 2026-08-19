@@ -547,6 +547,23 @@ pub async fn install_local(state: &AppState, id: i64, jar: &Path) -> AppResult<M
 
 /// Downloads and records one planned mod. Used by both the install flow and the
 /// pack import.
+/// Whether a file URL is one this app will download from.
+///
+/// Each source has its own CDN, and a version resolved from one must not be
+/// able to point the downloader at the other's — or anywhere else.
+pub fn download_host_allowed(source: SourceId, url: &str) -> bool {
+    match source {
+        SourceId::CurseForge => {
+            let host = crate::mods::ratelimit::host_of(url);
+            url.starts_with("https://")
+                && ["forgecdn.net", "curseforge.com"]
+                    .iter()
+                    .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+        }
+        _ => modrinth::host_allowed(url),
+    }
+}
+
 pub async fn install_planned(
     state: &AppState,
     id: i64,
@@ -563,7 +580,7 @@ pub async fn install_planned(
     let file = version
         .primary_file()
         .ok_or_else(|| AppError::Other(format!("{} has no downloadable file", planned.project_title)))?;
-    if !modrinth::host_allowed(&file.url) {
+    if !download_host_allowed(version.source, &file.url) {
         return Err(AppError::Other(format!(
             "{} would download from {}, which is not an allowed host",
             planned.file_name, file.url
@@ -585,6 +602,11 @@ pub async fn install_planned(
 
     let target = folder.join(&file.file_name);
     crate::download::download(&state.http, &artifact, &target, cancel, |_| {}).await?;
+
+    // Another version of the same project may already be installed under a
+    // different file name — switching version, or going back to an older one.
+    // Leaving both would load two copies of the same mod, which is a crash.
+    replace_other_versions(state, id, &version.project_id, &file.file_name, &folder).await?;
 
     let now = now_rfc3339();
     let mod_id: i64 = sqlx::query_scalar(
@@ -612,7 +634,7 @@ pub async fn install_planned(
     .bind(version.source.as_str())
     .bind(&version.project_id)
     .bind(&version.id)
-    .bind(format!("https://modrinth.com/mod/{}", version.project_id))
+    .bind(planned.page_url.clone())
     .bind(&file.sha1)
     .bind(&file.sha512)
     .bind(file.size.map(|size| size as i64))
@@ -661,6 +683,45 @@ pub struct TrackedMod {
 
 /// Mods this app installed from a source, which are the only ones it can check
 /// for updates.
+/// Removes any other file of the same project, on disk and in the table.
+///
+/// Switching to a different version is the normal way this happens, and it must
+/// leave exactly one jar behind — including when the previous one was disabled,
+/// which is the `.jar.disabled` name.
+async fn replace_other_versions(
+    state: &AppState,
+    id: i64,
+    project_id: &str,
+    keep_file_name: &str,
+    folder: &Path,
+) -> AppResult<()> {
+    let others: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT id, file_name FROM mods
+         WHERE instance_id = ? AND project_id = ? AND file_name != ?",
+    )
+    .bind(id)
+    .bind(project_id)
+    .bind(keep_file_name)
+    .fetch_all(&state.db)
+    .await?;
+
+    for (row_id, file_name) in others {
+        for candidate in [folder.join(&file_name), folder.join(format!("{file_name}.disabled"))] {
+            if candidate.is_file() {
+                tokio::fs::remove_file(&candidate)
+                    .await
+                    .ctx("remove the previous version", &candidate)?;
+            }
+        }
+        sqlx::query("DELETE FROM mods WHERE id = ?")
+            .bind(row_id)
+            .execute(&state.db)
+            .await?;
+        tracing::info!(project = project_id, replaced = %file_name, "switched mod version");
+    }
+    Ok(())
+}
+
 pub async fn tracked(state: &AppState, id: i64) -> AppResult<Vec<TrackedMod>> {
     let rows = sqlx::query_as::<_, TrackedMod>(
         "SELECT id, file_name, project_id, version_id, pinned, source
@@ -842,5 +903,129 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn installing_another_version_replaces_the_one_that_is_there() {
+        // Switching version — or going back to an older one — must leave one
+        // jar. Two files of the same mod in `mods/` is a crash on boot.
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("mods");
+        std::fs::create_dir_all(&folder).unwrap();
+
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, dir.path().to_path_buf());
+        let now = now_rfc3339();
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, created_at, updated_at)
+             VALUES ('u1', 'A', ?, 'fabric', '1.21.4', 'jar', '[]', '[]', ?, ?)",
+        )
+        .bind(dir.path().to_string_lossy().to_string())
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        // An older version is installed, and disabled at that.
+        let old = folder.join("sodium-0.5.jar");
+        std::fs::write(old.with_extension("jar.disabled"), b"old").unwrap();
+        sqlx::query(
+            "INSERT INTO mods (instance_id, target_dir, file_name, display_name, source,
+                project_id, version_id, enabled, pinned, installed_at, updated_at)
+             VALUES (1, 'mods', 'sodium-0.5.jar', 'Sodium', 'modrinth', 'AANobbMI', 'v-old',
+                0, 0, ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        // The new one lands, and the old row and file go.
+        std::fs::write(folder.join("sodium-0.6.jar"), b"new").unwrap();
+        replace_other_versions(&state, 1, "AANobbMI", "sodium-0.6.jar", &folder)
+            .await
+            .unwrap();
+
+        assert!(!old.with_extension("jar.disabled").exists(), "the disabled jar went too");
+        assert!(folder.join("sodium-0.6.jar").is_file());
+        let rows: Vec<String> = sqlx::query_scalar("SELECT file_name FROM mods WHERE instance_id = 1")
+            .fetch_all(&state.db)
+            .await
+            .unwrap();
+        assert!(rows.is_empty(), "the old row is gone: {rows:?}");
+    }
+
+    #[tokio::test]
+    async fn another_project_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("mods");
+        std::fs::create_dir_all(&folder).unwrap();
+
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, dir.path().to_path_buf());
+        let now = now_rfc3339();
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, created_at, updated_at)
+             VALUES ('u1', 'A', 'Z:/a', 'fabric', '1.21.4', 'jar', '[]', '[]', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        std::fs::write(folder.join("lithium.jar"), b"other").unwrap();
+        sqlx::query(
+            "INSERT INTO mods (instance_id, target_dir, file_name, display_name, source,
+                project_id, version_id, enabled, pinned, installed_at, updated_at)
+             VALUES (1, 'mods', 'lithium.jar', 'Lithium', 'modrinth', 'gvQqBUqZ', 'v1', 1, 0, ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        replace_other_versions(&state, 1, "AANobbMI", "sodium-0.6.jar", &folder)
+            .await
+            .unwrap();
+
+        assert!(folder.join("lithium.jar").is_file(), "a different mod is untouched");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM mods")
+                .fetch_one(&state.db)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn each_source_downloads_only_from_its_own_hosts() {
+        // A version resolved from one source must not be able to point the
+        // downloader at the other's CDN, or anywhere else.
+        assert!(download_host_allowed(
+            SourceId::Modrinth,
+            "https://cdn.modrinth.com/data/AANobbMI/versions/x/sodium.jar"
+        ));
+        assert!(download_host_allowed(
+            SourceId::CurseForge,
+            "https://edge.forgecdn.net/files/5300/0/jei.jar"
+        ));
+
+        assert!(!download_host_allowed(
+            SourceId::CurseForge,
+            "https://cdn.modrinth.com/data/x/sodium.jar"
+        ));
+        assert!(!download_host_allowed(
+            SourceId::Modrinth,
+            "https://edge.forgecdn.net/files/5300/0/jei.jar"
+        ));
+        assert!(!download_host_allowed(SourceId::CurseForge, "http://edge.forgecdn.net/x.jar"));
+        assert!(!download_host_allowed(SourceId::CurseForge, "https://evil.example.com/x.jar"));
     }
 }

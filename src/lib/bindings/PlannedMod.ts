@@ -9,7 +9,11 @@ export type PlannedMod = {
  * Where this came from. Two sources are in play, and a file reference from
  * one is meaningless to the other.
  */
-source: SourceId, projectId: string, projectTitle: string, versionId: string, versionNumber: string, fileName: string, size: number | null, 
+source: SourceId, 
+/**
+ * The project's page on that source, for the row this install writes.
+ */
+pageUrl: string | null, projectId: string, projectTitle: string, versionId: string, versionNumber: string, fileName: string, size: number | null, 
 /**
  * 0 for what the user asked for, 1+ for what it pulled in.
  */

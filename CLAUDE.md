@@ -288,6 +288,21 @@ are shown for everyone but marked and never installable. Icons are cached under
 `<data>/cache/icons/` by a hash of their URL and read through the asset protocol, whose
 scope is that folder alone.
 
+### A version is chosen, not assumed
+A card's Install is a shortcut for "the newest file that fits", and it says so. The detail
+panel is where a particular file is picked: every version the source published, newest by
+its own publish date, with channel, Minecraft versions, date and size — and a toggle that
+shows the ones that do not fit, each labelled with the reason ("Forge only", "for 1.20.1")
+rather than hidden. Dependencies are listed per version, because they differ between them.
+
+An installed mod is marked in that list and can be switched to any other version, downgrade
+included; `mods.version_id` is what marks it. Installing another version of a project
+removes the previous file and its row (`replace_other_versions`), including a
+`.jar.disabled` one — two copies of the same mod in `mods/` is a crash on boot.
+
+Each source downloads only from its own CDN (`download_host_allowed`): a version resolved
+from one must not be able to point the downloader at the other's, or anywhere else.
+
 ### Dependency resolution is confirmed before anything downloads
 Required dependencies are followed recursively into a plan the user confirms; optional ones
 are listed and never installed on their own; two versions of one project is a conflict that

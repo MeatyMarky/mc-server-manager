@@ -24,17 +24,20 @@ import type { InstanceView, Project } from "@/lib/types";
 export function InstallPlanDialog({
   instance,
   project,
+  versionId,
   onClose,
 }: {
   instance: InstanceView;
   project: Project | null;
+  /// The file the user picked, or null for "the newest that fits".
+  versionId?: string | null;
   onClose: () => void;
 }) {
   const plan = useQuery({
-    queryKey: ["mod-plan", instance.id, project?.source, project?.id],
+    queryKey: ["mod-plan", instance.id, project?.source, project?.id, versionId ?? null],
     // The source the card came from: a CurseForge file id means nothing to
     // Modrinth, and the other way round.
-    queryFn: () => ipc.modsPlan(instance.id, project!.source, project!.id, null),
+    queryFn: () => ipc.modsPlan(instance.id, project!.source, project!.id, versionId ?? null),
     enabled: project !== null,
     retry: false,
   });

@@ -133,6 +133,22 @@ pub async fn mods_search(
     AnySource::build(&state, source).await?.search(&query).await
 }
 
+/// One project in full, for the detail panel.
+///
+/// The search result carries only what a card needs; the licence, the links and
+/// the long description come from the project endpoint.
+#[tauri::command]
+pub async fn mods_project(
+    state: State<'_, AppState>,
+    source: SourceId,
+    project_id: String,
+) -> AppResult<crate::mods::Project> {
+    AnySource::build(&state, source)
+        .await?
+        .project(&project_id)
+        .await
+}
+
 /// The local file for a project's icon, fetching it once.
 ///
 /// Returns `null` for a project with no icon; the card draws a placeholder
@@ -187,22 +203,30 @@ pub struct ContentTypeOption {
 
 /// Versions of a project that suit this instance, newest first.
 #[tauri::command]
+/// `filter_to_instance: false` asks for everything the project has ever
+/// published, which the detail panel shows greyed with the reason each one does
+/// not fit — sometimes an older file is exactly what somebody wants.
 pub async fn mods_versions(
     state: State<'_, AppState>,
     id: i64,
     source: SourceId,
     project_id: String,
+    filter_to_instance: Option<bool>,
 ) -> AppResult<Vec<SourceVersion>> {
     let row = instance::get(&state.db, id).await?;
     let loader = mods::loader_of(row.server_type, &row.name)?;
     let index = providers::index::ensure_fresh(&state.db, &state.http).await?;
-    let filter = VersionFilter {
-        loaders: loader
-            .accepted()
-            .iter()
-            .map(|loader| loader.to_string())
-            .collect(),
-        game_versions: vec![row.mc_version],
+    let filter = if filter_to_instance.unwrap_or(true) {
+        VersionFilter {
+            loaders: loader
+                .accepted()
+                .iter()
+                .map(|loader| loader.to_string())
+                .collect(),
+            game_versions: vec![row.mc_version],
+        }
+    } else {
+        VersionFilter::default()
     };
 
     let mut versions = AnySource::build(&state, source)

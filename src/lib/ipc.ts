@@ -30,6 +30,7 @@ import type {
   ContentType,
   ContentTypeOption,
   ModView,
+  Project,
   ModsView,
   SearchPage,
   SortBy,
@@ -217,8 +218,15 @@ export const ipc = {
   modsContentTypes: (id: number) => invoke<ContentTypeOption[]>("mods_content_types", { id }),
   /** The cached file for an icon, or null when the project has none. */
   modsIcon: (url: string | null) => invoke<string | null>("mods_icon", { url }),
-  modsVersions: (id: number, source: SourceId, projectId: string) =>
-    invoke<SourceVersion[]>("mods_versions", { id, source, projectId }),
+  /**
+   * Versions of a project. `filterToInstance: false` returns everything the
+   * project ever published, which the detail panel shows greyed with a reason.
+   */
+  modsVersions: (id: number, source: SourceId, projectId: string, filterToInstance = true) =>
+    invoke<SourceVersion[]>("mods_versions", { id, source, projectId, filterToInstance }),
+  /** One project in full: licence, links and the long description. */
+  modsProject: (source: SourceId, projectId: string) =>
+    invoke<Project>("mods_project", { source, projectId }),
   /** Resolves dependencies. Nothing is downloaded until the plan is confirmed. */
   modsPlan: (id: number, source: SourceId, projectId: string, versionId: string | null) =>
     invoke<InstallPlan>("mods_plan", { id, source, projectId, versionId }),

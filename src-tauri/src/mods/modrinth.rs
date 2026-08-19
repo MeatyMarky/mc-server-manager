@@ -164,6 +164,18 @@ struct ApiProject {
     downloads: Option<i64>,
     updated: Option<String>,
     project_type: Option<String>,
+    body: Option<String>,
+    license: Option<ApiLicense>,
+    source_url: Option<String>,
+    issues_url: Option<String>,
+    wiki_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiLicense {
+    /// "MIT", "LGPL-3.0-only".
+    id: Option<String>,
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -217,6 +229,12 @@ fn to_project(hit: Hit) -> Project {
         page_url: Some(format!("https://modrinth.com/{}/{}", page_segment(content_type), hit.slug)),
         updated: hit.date_modified,
         content_type,
+        // Only the project endpoint carries these; a search hit has none.
+        license: None,
+        source_url: None,
+        issues_url: None,
+        wiki_url: None,
+        body: None,
         // Modrinth serves every file it lists.
         downloadable: true,
         id: hit.project_id,
@@ -305,6 +323,13 @@ fn project_from_api(project: ApiProject) -> Project {
         )),
         updated: project.updated,
         content_type,
+        license: project
+            .license
+            .and_then(|license| license.name.or(license.id)),
+        source_url: project.source_url,
+        issues_url: project.issues_url,
+        wiki_url: project.wiki_url,
+        body: project.body,
         downloadable: true,
         id: project.id,
         slug: project.slug,

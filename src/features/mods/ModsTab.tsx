@@ -23,12 +23,16 @@ import { toastError } from "@/lib/toast";
 import type { InstanceView, ModView, Project } from "@/lib/types";
 import { InstallPlanDialog } from "./InstallPlanDialog";
 import { ModBrowser } from "./ModBrowser";
+import { ModDetailDialog } from "./ModDetailDialog";
 import { contentLabel, displayName, displayVersion, mismatchSummary, sortForDisplay } from "./modLabels";
 import { PackImportDialog } from "./PackImportDialog";
 
 export function ModsTab({ instance }: { instance: InstanceView }) {
   const queryClient = useQueryClient();
   const [browsing, setBrowsing] = useState(false);
+  // The project whose versions are being looked at, and the file chosen for it.
+  const [detailFor, setDetailFor] = useState<Project | null>(null);
+  const [chosenVersion, setChosenVersion] = useState<string | null>(null);
   const [planFor, setPlanFor] = useState<Project | null>(null);
   const [pack, setPack] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -192,7 +196,14 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {browsing ? (
           <div className="mb-6">
-            <ModBrowser instance={instance} onInstall={(project) => setPlanFor(project)} />
+            <ModBrowser
+              instance={instance}
+              onInstall={(project) => {
+                setChosenVersion(null);
+                setPlanFor(project);
+              }}
+              onOpen={(project) => setDetailFor(project)}
+            />
           </div>
         ) : null}
 
@@ -228,10 +239,30 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
         </section>
       </div>
 
+      <ModDetailDialog
+        instance={instance}
+        project={detailFor}
+        loader={mods.data?.loader ?? null}
+        installedVersionId={
+          mods.data?.mods.find((mod) => mod.tracked?.projectId === detailFor?.id)?.tracked
+            ?.versionId ?? null
+        }
+        onClose={() => setDetailFor(null)}
+        onInstall={(project, versionId) => {
+          setDetailFor(null);
+          setChosenVersion(versionId);
+          setPlanFor(project);
+        }}
+      />
+
       <InstallPlanDialog
         instance={instance}
         project={planFor}
-        onClose={() => setPlanFor(null)}
+        versionId={chosenVersion}
+        onClose={() => {
+          setPlanFor(null);
+          setChosenVersion(null);
+        }}
       />
       <PackImportDialog instance={instance} archive={pack} onClose={() => setPack(null)} />
     </div>

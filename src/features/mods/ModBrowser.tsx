@@ -39,9 +39,13 @@ import {
 export function ModBrowser({
   instance,
   onInstall,
+  onOpen,
 }: {
   instance: InstanceView;
+  /// The card's shortcut: the newest file that fits.
   onInstall: (project: Project) => void;
+  /// Opening the card, where a particular version can be chosen.
+  onOpen: (project: Project) => void;
 }) {
   const [source, setSource] = useState<SourceId>("modrinth");
   const [text, setText] = useState("");
@@ -232,6 +236,7 @@ export function ModBrowser({
                 project={project}
                 installable={installable}
                 onInstall={() => onInstall(project)}
+                onOpen={() => onOpen(project)}
               />
             ))}
           </ul>
@@ -273,26 +278,36 @@ function ProjectCard({
   project,
   installable,
   onInstall,
+  onOpen,
 }: {
   project: Project;
   installable: boolean;
   onInstall: () => void;
+  onOpen: () => void;
 }) {
   const blocked = blockedReason(project, installable);
 
   return (
     <li className="flex flex-col gap-2 rounded-lg border border-border p-3">
-      <div className="flex items-start gap-3">
+      {/* The card itself opens the detail panel; the buttons below are the
+          shortcuts. A button rather than a click handler on the li, so it is
+          reachable by keyboard like everything else. */}
+      <button
+        type="button"
+        className="flex items-start gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        onClick={onOpen}
+        aria-label={`Open ${project.title}`}
+      >
         <ProjectIcon url={project.iconUrl} title={project.title} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium" title={project.title}>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium" title={project.title}>
             {project.title}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
             {project.author ?? "unknown author"}
-          </p>
-        </div>
-      </div>
+          </span>
+        </span>
+      </button>
 
       <p className="line-clamp-3 text-xs text-muted-foreground">{project.description}</p>
 
@@ -307,8 +322,11 @@ function ProjectCard({
       </p>
 
       <div className="mt-auto flex items-center gap-2">
-        <Button size="sm" disabled={blocked !== null} onClick={onInstall}>
-          <Package /> Install
+        <Button size="sm" disabled={blocked !== null} onClick={onInstall} title="The newest version that fits this server">
+          <Package /> Install newest
+        </Button>
+        <Button size="sm" variant="outline" onClick={onOpen}>
+          Versions…
         </Button>
         {project.pageUrl ? (
           <Button size="sm" variant="ghost" onClick={() => void openUrl(project.pageUrl!)}>
