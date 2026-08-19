@@ -6,7 +6,8 @@ import { toast } from "sonner";
 
 import { instanceKeys } from "@/features/instances/queries";
 import { onTaskDone, onTaskProgress } from "@/lib/events";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { ServerType, TaskDoneEvent } from "@/lib/types";
 
 export const setupKeys = {
@@ -51,7 +52,7 @@ export function useAcceptEula(id: number) {
       void queryClient.invalidateQueries({ queryKey: setupKeys.eula(id) });
       void queryClient.invalidateQueries({ queryKey: instanceKeys.all });
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 }
 
@@ -79,7 +80,7 @@ export function useRescanJava() {
           : `Found ${runtimes.length} Java runtimes`,
       );
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 }
 
@@ -92,7 +93,7 @@ export function useAddJava() {
       void queryClient.invalidateQueries({ queryKey: ["java-status"] });
       toast.success(`Added Java ${runtime.major} from ${runtime.path}`);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 }
 
@@ -165,7 +166,7 @@ export function useInstall(instanceId: number) {
         message: "Starting…",
       });
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 

@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, Mutation } from "@/lib/types";
 
 /** How a change was carried out, so the user knows the running server was told. */
@@ -38,7 +39,7 @@ export function PlayersTab({ instance }: { instance: InstanceView }) {
           : ROUTE_NOTE.file,
       });
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const data = lists.data;

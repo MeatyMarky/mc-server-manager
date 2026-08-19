@@ -4,7 +4,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { instanceKeys } from "@/features/instances/queries";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, StopStage } from "@/lib/types";
 
 const STOP_MESSAGE: Record<StopStage, string> = {
@@ -15,7 +16,16 @@ const STOP_MESSAGE: Record<StopStage, string> = {
 };
 
 /** Start / stop / restart, plus the port conflict warning shown before a start. */
-export function RunControls({ instance }: { instance: InstanceView }) {
+export function RunControls({
+  instance,
+  onStartError,
+}: {
+  instance: InstanceView;
+  /// Called with whatever stopped the server from starting, so the Console tab
+  /// can keep it on screen; a toast for "no Java found" is gone before the user
+  /// has read the fix.
+  onStartError?: (error: unknown) => void;
+}) {
   const queryClient = useQueryClient();
   const stopped = instance.status === "stopped" || instance.status === "crashed";
   const live =
@@ -41,9 +51,13 @@ export function RunControls({ instance }: { instance: InstanceView }) {
     mutationFn: () => ipc.instanceStart(instance.id),
     onSuccess: () => {
       invalidate();
+      onStartError?.(null);
       toast.success(`Starting "${instance.name}"`);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => {
+      onStartError?.(error);
+      toastError(error);
+    },
   });
 
   const stop = useMutation({
@@ -57,7 +71,7 @@ export function RunControls({ instance }: { instance: InstanceView }) {
         toast.success(`"${instance.name}" stopped`, { description });
       }
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const restart = useMutation({
@@ -66,7 +80,7 @@ export function RunControls({ instance }: { instance: InstanceView }) {
       invalidate();
       toast.success(`Restarting "${instance.name}"`);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const busy = start.isPending || stop.isPending || restart.isPending;

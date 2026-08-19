@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { Boxes, TriangleAlert } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/misc";
 import { formatBytes } from "@/lib/format";
 import { errorMessage, ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView } from "@/lib/types";
 
 /**
@@ -43,7 +43,7 @@ export function PackImportDialog({
       await ipc.mrpackImport(instance.id, archive);
       onClose();
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 

@@ -12,9 +12,11 @@
     "core:window:allow-set-focus",
     "core:event:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-confirm",
     "opener:allow-open-path",
-    "opener:allow-open-url"
+    "opener:allow-open-url",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

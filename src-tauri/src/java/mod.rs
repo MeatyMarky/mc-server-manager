@@ -78,7 +78,7 @@ pub async fn rescan(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
 
     let probes = tokio::task::spawn_blocking(move || detect::detect_all(&cached))
         .await
-        .map_err(|e| AppError::Other(format!("Java detection failed: {e}")))?;
+        .map_err(|e| AppError::internal("Java detection", e))?;
 
     let now = now_rfc3339();
     for probe in &probes {
@@ -121,6 +121,10 @@ pub async fn rescan(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
                 .await?;
         }
     }
+
+    // Recorded so the first-run screen can tell "no Java on this machine" apart
+    // from "detection has not run yet"; the two need different words.
+    crate::db::setting_set(pool, "java_scanned_at", &now).await?;
 
     list(pool).await
 }
@@ -228,5 +232,23 @@ mod tests {
             .await
             .unwrap();
         assert!(list(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_scan_records_that_it_happened_even_when_it_finds_nothing() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        assert_eq!(
+            crate::db::setting_get(&pool, "java_scanned_at").await.unwrap(),
+            None
+        );
+
+        rescan(&pool).await.unwrap();
+
+        // Whatever this machine has, the fact that we looked is now on record —
+        // that is what separates "no Java here" from "not looked yet".
+        assert!(crate::db::setting_get(&pool, "java_scanned_at")
+            .await
+            .unwrap()
+            .is_some());
     }
 }

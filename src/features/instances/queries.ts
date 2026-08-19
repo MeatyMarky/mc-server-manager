@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { toast } from "sonner";
 
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import { onInstanceStatus, onInstancesChanged } from "@/lib/events";
 import type {
   CloneInstanceInput,
@@ -66,7 +67,7 @@ function useInstanceMutation<TInput, TResult>(
       void queryClient.invalidateQueries({ queryKey: instanceKeys.all });
       toast.success(successMessage(result, input));
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 }
 

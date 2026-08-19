@@ -66,7 +66,7 @@ impl Fetch for Http {
             .get(url)
             .send()
             .await
-            .map_err(|e| AppError::Network(format!("{url} could not be reached: {e}")))?;
+            .map_err(|e| crate::error::from_reqwest(url, &e))?;
 
         let status = response.status();
         if !status.is_success() {

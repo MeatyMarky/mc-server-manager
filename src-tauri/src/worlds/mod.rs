@@ -158,7 +158,7 @@ pub async fn list(state: &AppState, id: i64) -> AppResult<Vec<World>> {
     let scan_dir = dir.clone();
     tokio::task::spawn_blocking(move || scan(&scan_dir, &active))
         .await
-        .map_err(|e| AppError::Other(format!("world scan failed: {e}")))
+        .map_err(|e| AppError::internal("scanning for worlds", e))
 }
 
 /// Total size in bytes, reported as it goes. Cancellable, and never run on the

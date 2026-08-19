@@ -5,6 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppErrorShape,
   AppInfo,
+  BuildInfo,
+  Readiness,
+  ReportPreview,
   ArchiveEntry,
   Backup,
   BackupOptions,
@@ -60,6 +63,30 @@ export function errorMessage(error: unknown): string {
   if (isAppError(error)) return error.message;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/**
+ * Splits a failure into what a person is told and what a developer needs.
+ *
+ * Anything that is not an `AppError` — a thrown JS error, a string — has no
+ * readable half, so its text goes in both places rather than being hidden.
+ */
+export function errorParts(error: unknown): {
+  message: string;
+  hint: string | null;
+  technical: string | null;
+  kind: string;
+} {
+  if (isAppError(error)) {
+    return {
+      message: error.message,
+      hint: error.hint ?? null,
+      technical: error.technical ?? null,
+      kind: error.kind,
+    };
+  }
+  const text = error instanceof Error ? error.message : String(error);
+  return { message: text, hint: null, technical: text, kind: "unknown" };
 }
 
 export const ipc = {
@@ -217,4 +244,14 @@ export const ipc = {
     invoke<Sample[]>("metrics_range", { id, window }),
   /** The heap the JVM is actually given, for the memory chart's ceiling. */
   metricsHeapBytes: (id: number) => invoke<number | null>("metrics_heap_bytes", { id }),
+
+  // Phase 7: about, first run, problem reports.
+  buildInfo: () => invoke<BuildInfo>("build_info"),
+  startupReadiness: () => invoke<Readiness>("startup_readiness"),
+  /** Everything the report would contain, so it can be read before it exists. */
+  reportPreview: (id: number | null, lines?: number) =>
+    invoke<ReportPreview>("report_preview", { id, lines }),
+  /** Writes the report to `target` and resolves with the path written. */
+  reportWrite: (target: string, id: number | null, lines?: number) =>
+    invoke<string>("report_write", { target, id, lines }),
 };

@@ -7,11 +7,16 @@ import { STATUS_COLOR, STATUS_LABEL, SERVER_TYPE_LABEL, statusPulses } from "@/l
 import type { InstanceStatus, InstanceView } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+/// Decorative on purpose: every place that shows the dot also states the status
+/// in text next to it, so announcing it here would read it out twice.
 export function StatusDot({ status }: { status: InstanceStatus }) {
   return (
     <span
       aria-hidden
-      className={cn("inline-block size-2.5 shrink-0 rounded-full", statusPulses(status) && "animate-pulse")}
+      className={cn(
+        "inline-block size-2.5 shrink-0 rounded-full",
+        statusPulses(status) && "animate-pulse",
+      )}
       style={{ backgroundColor: STATUS_COLOR[status] }}
     />
   );

@@ -172,7 +172,7 @@ pub async fn list(state: &AppState, id: i64) -> AppResult<ModsView> {
         scan(&folder, &tracked, &dependents, loader, &mc_version)
     })
     .await
-    .map_err(|e| AppError::Other(format!("scanning the content folder failed: {e}")))?;
+    .map_err(|e| AppError::internal("scanning the content folder", e))?;
 
     Ok(ModsView {
         content_dir: Some(loader.content_dir().to_string()),
@@ -395,7 +395,7 @@ pub async fn install_local(state: &AppState, id: i64, jar: &Path) -> AppResult<M
     let path = target.clone();
     let metadata = tokio::task::spawn_blocking(move || jarmeta::read_jar(&path))
         .await
-        .map_err(|e| AppError::Other(format!("reading the jar failed: {e}")))?
+        .map_err(|e| AppError::internal("reading the jar", e))?
         .unwrap_or(None);
 
     let size = tokio::fs::metadata(&target).await.map(|m| m.len()).unwrap_or(0);

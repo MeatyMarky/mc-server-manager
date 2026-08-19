@@ -3,11 +3,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { ErrorNotice } from "@/components/ui/ErrorNotice";
 import { Input } from "@/components/ui/input";
 import { Badge, Switch } from "@/components/ui/misc";
 import { Label } from "@/components/ui/dialog";
 import { InstallPanel } from "@/features/setup/InstallPanel";
-import { errorMessage } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, LogLevel } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { filterLines, historyStep, useConsole } from "./useConsole";
@@ -22,7 +23,14 @@ const LEVEL_CLASS: Record<LogLevel, string> = {
   raw: "text-muted-foreground",
 };
 
-export function ConsoleTab({ instance }: { instance: InstanceView }) {
+export function ConsoleTab({
+  instance,
+  startError,
+}: {
+  instance: InstanceView;
+  /// The last thing that stopped this server from starting, if any.
+  startError?: unknown;
+}) {
   const { lines, history, send } = useConsole(instance.id, instance.uuid);
   const [search, setSearch] = useState("");
   const [autoscroll, setAutoscroll] = useState(true);
@@ -47,7 +55,7 @@ export function ConsoleTab({ instance }: { instance: InstanceView }) {
     try {
       await send(command);
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 
@@ -108,11 +116,19 @@ export function ConsoleTab({ instance }: { instance: InstanceView }) {
         </Button>
       </div>
 
+      {startError ? <ErrorNotice error={startError} className="mb-3" /> : null}
+
       <div
         ref={scroller}
         tabIndex={0}
         role="log"
         aria-label="Server console"
+        // A busy server prints thousands of lines a second. `additions text`
+        // keeps a screen reader announcing new output instead of re-reading the
+        // whole buffer, and the region stays focusable so it can be reviewed at
+        // the user's own pace.
+        aria-relevant="additions text"
+        aria-atomic="false"
         className="min-h-64 flex-1 overflow-y-auto rounded-md border border-border bg-card/40 p-3 font-mono text-xs leading-relaxed"
         onScroll={(event) => {
           // Scrolling away from the bottom turns autoscroll off, the way a
@@ -132,6 +148,11 @@ export function ConsoleTab({ instance }: { instance: InstanceView }) {
         ) : (
           visible.map((line) => (
             <div key={line.seq} className={cn("whitespace-pre-wrap", LEVEL_CLASS[line.level])}>
+              {/* Colour alone carries the level for sighted users; this says it
+                  out loud for everyone else. */}
+              {line.level === "error" || line.level === "warn" ? (
+                <span className="sr-only">{line.level === "error" ? "Error: " : "Warning: "}</span>
+              ) : null}
               {line.timestamp ? (
                 <span className="text-muted-foreground">[{line.timestamp}] </span>
               ) : null}

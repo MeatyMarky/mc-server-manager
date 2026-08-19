@@ -1,9 +1,12 @@
-import { Moon, Sun } from "lucide-react";
+import { HelpCircle, Info, Moon, Sun } from "lucide-react";
 import { useEffect } from "react";
 import { Toaster } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { AboutDialog } from "@/features/app/AboutDialog";
+import { FirstRun } from "@/features/app/FirstRun";
 import { QuitDialog } from "@/features/app/QuitDialog";
+import { ReportProblemDialog } from "@/features/app/ReportProblemDialog";
 import { InstanceDetail } from "@/features/instance/InstanceDetail";
 import { CreateInstanceDialog } from "@/features/instances/CreateInstanceDialog";
 import { ImportInstanceDialog } from "@/features/instances/ImportInstanceDialog";
@@ -18,6 +21,8 @@ export default function App() {
   const { selectedInstanceId, selectInstance, theme, setTheme } = useUiStore();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [about, setAbout] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   useInstanceEvents();
 
@@ -58,7 +63,25 @@ export default function App() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="flex justify-end px-6 pt-4">
+        <div className="flex justify-end gap-1 px-6 pt-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setReporting(true)}
+            aria-label="Report a problem"
+            title="Report a problem"
+          >
+            <HelpCircle />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setAbout(true)}
+            aria-label="About this app"
+            title="About"
+          >
+            <Info />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -71,26 +94,31 @@ export default function App() {
 
         {selected ? (
           <InstanceDetail key={selected.id} instance={selected} />
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-10 text-center">
-            <div className="max-w-sm">
-              <h2 className="text-lg font-semibold">No instance selected</h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Create a new server instance, or import a folder that already contains one.
-              </p>
-              <div className="mt-4 flex justify-center gap-2">
-                <Button onClick={() => setCreating(true)}>New instance</Button>
-                <Button variant="outline" onClick={() => setImporting(true)}>
-                  Import existing
-                </Button>
-              </div>
-            </div>
+        ) : isLoading ? (
+          <div className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">
+            Loading your servers…
           </div>
+        ) : (
+          // Nothing yet is a starting point, not an empty list.
+          <FirstRun onCreate={() => setCreating(true)} onImport={() => setImporting(true)} />
         )}
       </main>
 
       <CreateInstanceDialog open={creating} onOpenChange={setCreating} />
       <ImportInstanceDialog open={importing} onOpenChange={setImporting} />
+      <AboutDialog
+        open={about}
+        onOpenChange={setAbout}
+        onReportProblem={() => {
+          setAbout(false);
+          setReporting(true);
+        }}
+      />
+      <ReportProblemDialog
+        open={reporting}
+        onOpenChange={setReporting}
+        instance={selected ?? null}
+      />
       <QuitDialog />
       <Toaster position="bottom-right" theme={theme} richColors closeButton />
     </div>

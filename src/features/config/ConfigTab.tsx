@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
 import { Badge, Switch } from "@/components/ui/misc";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, PropertyEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -50,13 +51,13 @@ export function ConfigTab({ instance }: { instance: InstanceView }) {
             : undefined,
       });
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const restart = useMutation({
     mutationFn: () => ipc.instanceRestart(instance.id),
     onSuccess: () => toast.success("Restarting to apply the changes"),
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const entries = properties.data?.entries ?? [];

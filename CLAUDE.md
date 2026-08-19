@@ -186,6 +186,16 @@ Due-ness is derived from `last_run_at`, so an app closed for a week comes back t
 overdue backup per schedule. Anything that skips a due run (nobody played, folder missing) still
 marks it as run, or the loop asks again every tick for as long as the condition holds.
 
+### Errors are written for the person reading them
+`AppError` carries two texts. `user_message()` is one plain sentence with no Rust in it,
+`hint()` is the next thing to do, and the `Display` text travels alongside as `technical`
+behind a "details" expander. A new variant adds arms to all three, and the test in
+`error.rs` walks every variant to check the readable one is a sentence and leaks no
+`sqlx`/`reqwest`/`os error` noise. Failures a user can act on get their own variant rather
+than `Other` — no Java, Java too old, port in use, disk full, offline, rate limited, EULA
+not accepted, corrupt instance — because the UI branches on `kind` to offer the fix, and it
+cannot branch on prose.
+
 ### `resource_samples` retention
 Full resolution for 24 h, downsampled to one row per minute after that, deleted past 30 days.
 The prune runs at app start and every 24 h.
@@ -195,6 +205,12 @@ A single loop refreshes the process table once per tick and writes a row per run
 so the sampling cost is the same for one server and for twenty. Charts read the tier their
 window has: full resolution inside an hour, minute buckets for a day, ten-minute and hourly
 buckets beyond that — asking for finer detail than retention kept would only invent it.
+
+### The problem report never leaves on its own
+`diag::preview` returns the exact text of every part; the dialog shows all of it, and only
+then does `write_zip` put it where the user chose. Nothing uploads, and the preview carries
+the notice that paths hold their user name and consoles hold player chat. The zip is rebuilt
+from the backend at write time rather than sent back from the UI.
 
 ## Database
 

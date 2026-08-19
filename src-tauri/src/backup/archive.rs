@@ -308,7 +308,7 @@ where
         }
         let relative = path.strip_prefix(instance_dir).unwrap_or(path);
         zip.start_file(to_archive_path(relative), options)
-            .map_err(|e| AppError::Other(format!("could not add an entry: {e}")))?;
+            .map_err(|e| AppError::internal("writing the archive", e))?;
 
         let mut source = std::fs::File::open(path).ctx("read file", path)?;
         loop {
@@ -317,7 +317,7 @@ where
                 break;
             }
             zip.write_all(&buffer[..read])
-                .map_err(|e| AppError::Other(format!("could not write the archive: {e}")))?;
+                .map_err(|e| AppError::internal("writing the archive", e))?;
             bytes_read += read as u64;
         }
 
@@ -331,7 +331,7 @@ where
     }
 
     zip.finish()
-        .map_err(|e| AppError::Other(format!("could not finish the archive: {e}")))?;
+        .map_err(|e| AppError::internal("writing the archive", e))?;
     Ok(())
 }
 
@@ -348,7 +348,7 @@ where
 {
     let file = std::fs::File::create(temp).ctx("create the archive", temp)?;
     let encoder = zstd::stream::Encoder::new(file, level)
-        .map_err(|e| AppError::Other(format!("could not start compression: {e}")))?;
+        .map_err(|e| AppError::internal("writing the archive", e))?;
     let mut tar = tar::Builder::new(encoder);
 
     let total = files.len() as u64;
@@ -362,7 +362,7 @@ where
         bytes_read += std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
 
         tar.append_path_with_name(path, to_archive_path(relative))
-            .map_err(|e| AppError::Other(format!("could not add {}: {e}", relative.display())))?;
+            .map_err(|e| AppError::internal("writing the archive", format!("{}: {e}", relative.display())))?;
 
         if position % 32 == 0 || position as u64 + 1 == total {
             report(Progress {
@@ -375,10 +375,10 @@ where
 
     let encoder = tar
         .into_inner()
-        .map_err(|e| AppError::Other(format!("could not finish the archive: {e}")))?;
+        .map_err(|e| AppError::internal("writing the archive", e))?;
     encoder
         .finish()
-        .map_err(|e| AppError::Other(format!("could not finish compression: {e}")))?;
+        .map_err(|e| AppError::internal("writing the archive", e))?;
     Ok(())
 }
 
@@ -416,11 +416,11 @@ pub fn list(archive: &Path) -> AppResult<Vec<ArchiveEntry>> {
     match format {
         Format::Zip => {
             let mut zip = zip::ZipArchive::new(file)
-                .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                .map_err(|e| AppError::archive(archive.display(), e))?;
             for index in 0..zip.len() {
                 let entry = zip
                     .by_index(index)
-                    .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                    .map_err(|e| AppError::archive(archive.display(), e))?;
                 if entry.is_file() {
                     entries.push(ArchiveEntry {
                         path: entry.name().to_string(),
@@ -431,14 +431,14 @@ pub fn list(archive: &Path) -> AppResult<Vec<ArchiveEntry>> {
         }
         Format::TarZst => {
             let decoder = zstd::stream::Decoder::new(file)
-                .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                .map_err(|e| AppError::archive(archive.display(), e))?;
             let mut tar = tar::Archive::new(decoder);
             for entry in tar
                 .entries()
-                .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?
+                .map_err(|e| AppError::archive(archive.display(), e))?
             {
                 let entry =
-                    entry.map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                    entry.map_err(|e| AppError::archive(archive.display(), e))?;
                 if entry.header().entry_type().is_file() {
                     entries.push(ArchiveEntry {
                         path: entry.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
@@ -477,7 +477,7 @@ where
     match format {
         Format::Zip => {
             let mut zip = zip::ZipArchive::new(file)
-                .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                .map_err(|e| AppError::archive(archive.display(), e))?;
             let total = zip.len() as u64;
 
             for index in 0..zip.len() {
@@ -486,7 +486,7 @@ where
                 }
                 let mut entry = zip
                     .by_index(index)
-                    .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                    .map_err(|e| AppError::archive(archive.display(), e))?;
                 let Some(relative) =
                     crate::worlds::archive::safe_entry_path(entry.name(), None)
                 else {
@@ -513,19 +513,19 @@ where
         }
         Format::TarZst => {
             let decoder = zstd::stream::Decoder::new(file)
-                .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                .map_err(|e| AppError::archive(archive.display(), e))?;
             let mut tar = tar::Archive::new(decoder);
             let mut done = 0u64;
 
             for entry in tar
                 .entries()
-                .map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?
+                .map_err(|e| AppError::archive(archive.display(), e))?
             {
                 if cancel.is_cancelled() {
                     return Err(AppError::Cancelled);
                 }
                 let mut entry =
-                    entry.map_err(|e| AppError::Other(format!("the archive could not be read: {e}")))?;
+                    entry.map_err(|e| AppError::archive(archive.display(), e))?;
                 let name = entry
                     .path()
                     .map(|path| path.to_string_lossy().to_string())

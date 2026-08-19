@@ -2,6 +2,7 @@ pub mod backup;
 pub mod commands;
 pub mod config;
 pub mod db;
+pub mod diag;
 pub mod error;
 pub mod download;
 pub mod events;
@@ -178,6 +179,10 @@ pub fn run() {
             commands::backups::schedule_run_now,
             commands::backups::metrics_range,
             commands::backups::metrics_heap_bytes,
+            commands::diag::build_info,
+            commands::diag::report_preview,
+            commands::diag::report_write,
+            commands::diag::startup_readiness,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

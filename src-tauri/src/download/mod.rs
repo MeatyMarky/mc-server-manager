@@ -158,7 +158,7 @@ where
     let response = request
         .send()
         .await
-        .map_err(|e| AppError::Network(format!("{} could not be reached: {e}", artifact.url)))?;
+        .map_err(|e| crate::error::from_reqwest(&artifact.url, &e))?;
 
     let status = response.status();
     if !status.is_success() {

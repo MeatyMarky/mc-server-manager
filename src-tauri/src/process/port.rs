@@ -10,7 +10,7 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 pub const DEFAULT_PORT: u16 = 25565;
 
@@ -61,16 +61,31 @@ pub enum PortCheck {
 }
 
 impl PortCheck {
-    pub fn message(&self) -> Option<String> {
+    /// The conflict as an error, or `None` when the port is free.
+    ///
+    /// A typed variant rather than a sentence: the UI wants to offer "open the
+    /// Config tab" for one case and "stop that server" for the other, and it
+    /// cannot branch on prose.
+    pub fn as_error(&self) -> Option<AppError> {
         match self {
             PortCheck::Free => None,
-            PortCheck::TakenByInstance { port, instance } => Some(format!(
-                "port {port} is already used by \"{instance}\"; stop it first or change server-port"
-            )),
-            PortCheck::TakenByOther { port } => Some(format!(
-                "port {port} is already in use by another program; change server-port or free the port"
-            )),
+            PortCheck::TakenByInstance { port, instance } => Some(AppError::PortInUse {
+                port: *port,
+                taken_by: Some(instance.clone()),
+            }),
+            PortCheck::TakenByOther { port } => Some(AppError::PortInUse {
+                port: *port,
+                taken_by: None,
+            }),
         }
+    }
+
+    /// The same thing as one line, for the pre-start banner.
+    pub fn message(&self) -> Option<String> {
+        self.as_error().map(|err| {
+            let hint = err.hint().unwrap_or_default();
+            format!("{} {hint}", err.user_message()).trim_end().to_string()
+        })
     }
 }
 
@@ -175,16 +190,26 @@ mod tests {
     #[test]
     fn conflicts_name_our_own_instance_when_we_know_it() {
         let ours = classify(25565, false, Some("Survival".into()));
+        let message = ours.message().unwrap();
+        assert!(message.contains("25565"), "{message}");
+        assert!(message.contains("Survival"), "{message}");
+        // The fix differs per case, which is why this is a typed error and not
+        // one sentence with a blank in it.
+        assert!(message.contains("Stop that server"), "{message}");
         assert_eq!(
-            ours.message().unwrap(),
-            "port 25565 is already used by \"Survival\"; stop it first or change server-port"
+            ours.as_error().unwrap().kind(),
+            "port_in_use",
+            "the UI branches on the kind"
         );
 
         let theirs = classify(25565, false, None);
-        assert!(theirs.message().unwrap().contains("another program"));
+        let message = theirs.message().unwrap();
+        assert!(message.contains("another program"), "{message}");
+        assert!(message.contains("server-port"), "{message}");
 
         assert_eq!(classify(25565, true, None), PortCheck::Free);
         assert!(classify(25565, true, None).message().is_none());
+        assert!(classify(25565, true, None).as_error().is_none());
     }
 
     #[test]

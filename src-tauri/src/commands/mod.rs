@@ -4,6 +4,7 @@
 pub mod app;
 pub mod backups;
 pub mod config;
+pub mod diag;
 pub mod instances;
 pub mod players;
 pub mod java;

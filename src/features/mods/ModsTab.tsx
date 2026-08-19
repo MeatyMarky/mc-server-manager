@@ -20,7 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Badge, Switch } from "@/components/ui/misc";
 import { onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes } from "@/lib/format";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, ModView, Project } from "@/lib/types";
 import { InstallPlanDialog } from "./InstallPlanDialog";
 import { contentLabel, displayName, displayVersion, mismatchSummary, sortForDisplay } from "./modLabels";
@@ -76,14 +77,14 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
     mutationFn: ({ fileName, enabled }: { fileName: string; enabled: boolean }) =>
       ipc.modsSetEnabled(instance.id, fileName, enabled),
     onSuccess: (view) => queryClient.setQueryData(["mods", instance.id], view),
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const setPinned = useMutation({
     mutationFn: ({ fileName, pinned }: { fileName: string; pinned: boolean }) =>
       ipc.modsSetPinned(instance.id, fileName, pinned),
     onSuccess: (view) => queryClient.setQueryData(["mods", instance.id], view),
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const uninstall = useMutation({
@@ -98,7 +99,7 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
         toast.success(`Removed ${fileName}`);
       }
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const checkUpdates = useMutation({
@@ -108,7 +109,7 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
       const updates = view.mods.filter((mod) => mod.tracked?.updateVersionId).length;
       toast.success(updates === 0 ? "Everything is up to date" : `${updates} update(s) available`);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   async function runSearch(event: React.FormEvent) {
@@ -117,7 +118,7 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
     try {
       setResults(await ipc.modsSearch(instance.id, search, 20));
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     } finally {
       setSearching(false);
     }
@@ -142,7 +143,7 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
         toast.success(`Installed ${installed.fileName}`);
       }
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 

@@ -262,7 +262,7 @@ pub async fn mrpack_plan(
 
     let index = tokio::task::spawn_blocking(move || mrpack::read_index(&path))
         .await
-        .map_err(|e| AppError::Other(format!("reading the pack failed: {e}")))??;
+        .map_err(|e| AppError::internal("reading the pack", e))??;
     mrpack::plan(index, row.server_type, &row.mc_version)
 }
 

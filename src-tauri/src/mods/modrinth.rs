@@ -75,7 +75,7 @@ impl Modrinth {
                 .get(url)
                 .send()
                 .await
-                .map_err(|e| AppError::Network(format!("{url} could not be reached: {e}")))?;
+                .map_err(|e| crate::error::from_reqwest(url, &e))?;
 
             let headers = response.headers().clone();
             let now = std::time::Instant::now();
@@ -87,10 +87,10 @@ impl Modrinth {
                     tracing::warn!(host = %host, seconds = wait.as_secs(), "Modrinth throttled us");
                     continue;
                 }
-                return Err(AppError::Network(format!(
-                    "Modrinth is rate limiting this app; try again in {} seconds",
-                    wait.as_secs()
-                )));
+                return Err(AppError::RateLimited {
+                    host: host.clone(),
+                    retry_after_s: wait.as_secs(),
+                });
             }
 
             if let Some(budget) = ratelimit::budget_from_headers(&headers) {

@@ -139,7 +139,7 @@ struct RawFile {
 /// Parses `modrinth.index.json`.
 pub fn parse_index(body: &str) -> AppResult<PackIndex> {
     let raw: RawIndex = serde_json::from_str(body)
-        .map_err(|e| AppError::Other(format!("modrinth.index.json could not be read: {e}")))?;
+        .map_err(|e| AppError::archive("modrinth.index.json", e))?;
 
     if let Some(version) = raw.format_version {
         if version != 1 {
@@ -206,7 +206,7 @@ pub fn read_index(archive: &Path) -> AppResult<PackIndex> {
             ))
         })?
         .read_to_string(&mut body)
-        .map_err(|e| AppError::Other(format!("the pack index could not be read: {e}")))?;
+        .map_err(|e| AppError::archive("modrinth.index.json", e))?;
 
     parse_index(&body)
 }
@@ -334,7 +334,7 @@ where
     let archive_path = archive.to_path_buf();
     let index = tokio::task::spawn_blocking(move || read_index(&archive_path))
         .await
-        .map_err(|e| AppError::Other(format!("reading the pack failed: {e}")))??;
+        .map_err(|e| AppError::internal("reading the pack", e))??;
     let plan = plan(index, row.server_type, &row.mc_version)?;
 
     // Staging lives inside the instance so the final move is a rename.
@@ -437,7 +437,7 @@ where
 fn unpack_overrides(archive: &Path, staging: &Path, cancel: &CancellationToken) -> AppResult<()> {
     let file = std::fs::File::open(archive).ctx("open the pack", archive)?;
     let mut zip = zip::ZipArchive::new(file)
-        .map_err(|e| AppError::Other(format!("the pack could not be read: {e}")))?;
+        .map_err(|e| AppError::archive("the .mrpack", e))?;
 
     let count = zip.len();
     for index in 0..count {
@@ -446,7 +446,7 @@ fn unpack_overrides(archive: &Path, staging: &Path, cancel: &CancellationToken) 
         }
         let mut entry = zip
             .by_index(index)
-            .map_err(|e| AppError::Other(format!("the pack could not be read: {e}")))?;
+            .map_err(|e| AppError::archive("the .mrpack", e))?;
 
         let name = entry.name().replace('\\', "/");
         // server-overrides wins over overrides, and client-overrides is ignored.

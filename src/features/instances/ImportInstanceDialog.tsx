@@ -1,7 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, Info } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/misc";
 import { Input, Select } from "@/components/ui/input";
 import { errorMessage, ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import { SERVER_TYPES, SERVER_TYPE_LABEL } from "@/lib/status";
 import type { ImportCandidate, ServerType } from "@/lib/types";
 import { useImportInstance } from "./queries";
@@ -49,7 +49,7 @@ export function ImportInstanceDialog({ open: isOpen, onOpenChange }: Props) {
       setServerType(found.serverType);
       setMcVersion(found.mcVersion ?? "");
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
       setCandidate(null);
     } finally {
       setDetecting(false);

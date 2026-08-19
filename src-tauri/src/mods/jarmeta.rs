@@ -198,7 +198,7 @@ pub fn parse_mods_toml(body: &str, neoforge: bool) -> AppResult<JarMetadata> {
     // A document, not a single value: toml's `FromStr for Value` parses the
     // latter, which is why this goes through `from_str::<Table>`.
     let value: toml::Table = toml::from_str(body)
-        .map_err(|e| AppError::Other(format!("mods.toml could not be read: {e}")))?;
+        .map_err(|e| AppError::Other(format!("this jar's mods.toml is not readable: {e}")))?;
 
     let first_mod = value
         .get("mods")

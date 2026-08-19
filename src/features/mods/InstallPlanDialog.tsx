@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { CornerDownRight, Download } from "lucide-react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/misc";
 import { formatBytes } from "@/lib/format";
 import { errorMessage, ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, Project } from "@/lib/types";
 
 /**
@@ -43,7 +43,7 @@ export function InstallPlanDialog({
       await ipc.modsInstall(instance.id, plan.data);
       onClose();
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 

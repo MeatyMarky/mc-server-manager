@@ -341,13 +341,26 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
   save-on-always path, plus live checks against a real Paper server (a generated world restored
   byte-identically in both formats, and the flush confirmation matched against real output).
 
-### Phase 7 — Polish + packaging
-- Error/empty/loading states everywhere, toast surface for `AppError`, keyboard-navigation pass,
-  focus rings, a11y labels, first-run experience.
-- Packaging: `.msi` (WiX) + `.deb` + AppImage via `tauri build`; icons and app metadata.
-- CI: GitHub Actions matrix (ubuntu-latest + windows-latest) → `cargo test`, `cargo clippy`,
-  `pnpm test`, `tsc`, plus a release job that produces installers.
-- README with build and run instructions.
+### Phase 7 — Polish + packaging  ✅
+- Every `AppError` variant carries a plain sentence and a fix as well as its technical text;
+  the ones with an action of their own became typed variants (no Java, Java too old, port in
+  use, disk full, offline, rate limited, EULA not accepted, corrupt instance, unreadable
+  archive, internal). `ErrorNotice` shows sentence + hint with the Rust text behind a
+  "Details" expander; toasts carry sentence + hint.
+- First run is an onboarding screen: background Java detection with three honest states
+  (still looking / nothing suitable, with a link and a rescan / found), and the two ways in.
+- EULA is a checkbox, never pre-checked, per instance, naming the file it writes and linking
+  Mojang's terms.
+- Accessibility: visible focus everywhere, ARIA labels on icon-only buttons, dialogs trap
+  focus and close on Escape (Radix), console is a `role="log"` region announcing additions
+  with levels spoken for screen readers.
+- Packaging: MSI + NSIS on Windows, `.deb` + AppImage on Linux; the commit SHA is stamped by
+  `build.rs` and shown, with the DB, log and instance paths, in an About dialog.
+- `.github/workflows/release.yml` builds both platforms on a `v*` tag and drafts a release.
+- README written for a non-developer, plus `docs/troubleshooting.md` for the top failure
+  modes, including what code signing would take.
+- "Report a problem" builds a zip (app log, Java, build and schema version, instance
+  settings, console tail) and shows every line before writing it. Nothing is uploaded.
 
 ---
 

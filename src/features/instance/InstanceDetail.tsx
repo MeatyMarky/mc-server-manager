@@ -1,6 +1,5 @@
 import { Copy, FolderOpen, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +15,8 @@ import {
   TabsTrigger,
 } from "@/components/ui/misc";
 import { StatusDot } from "@/features/instances/InstanceSidebar";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import { SERVER_TYPE_LABEL, STATUS_LABEL } from "@/lib/status";
 import type { InstanceView } from "@/lib/types";
 import { ConfigTab } from "@/features/config/ConfigTab";
@@ -44,6 +44,9 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
   const [renaming, setRenaming] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Kept here rather than inside the controls, so the reason a start failed is
+  // still readable in the Console tab after the toast has gone.
+  const [startError, setStartError] = useState<unknown>(null);
 
   const missing = instance.status === "missing";
 
@@ -66,7 +69,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <RunControls instance={instance} />
+          <RunControls instance={instance} onStartError={setStartError} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="icon" aria-label="Instance actions">
@@ -84,7 +87,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
                 disabled={missing}
                 onSelect={() => {
                   ipc.instanceOpenFolder(instance.id).catch((error) => {
-                    toast.error(errorMessage(error));
+                    toastError(error);
                   });
                 }}
               >
@@ -125,7 +128,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
               description="Locate the instance folder to work with this server again."
             />
           ) : (
-            <ConsoleTab instance={instance} />
+            <ConsoleTab instance={instance} startError={startError} />
           )}
         </TabsContent>
         <TabsContent value="mods" className="min-h-0">

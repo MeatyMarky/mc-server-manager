@@ -204,7 +204,7 @@ pub async fn plan(state: &AppState, id: i64, options: &BackupOptions) -> AppResu
         archive::estimate(&measure_dir, scope, &worlds, &exclude)
     })
     .await
-    .map_err(|e| AppError::Other(format!("measuring failed: {e}")))??;
+    .map_err(|e| AppError::internal("measuring the instance", e))??;
 
     let target_dir = backup_dir(&state.data_dir, &row.uuid);
     let free = tokio::task::spawn_blocking(move || free_space(&target_dir))
@@ -374,7 +374,7 @@ where
 
     let size = handle
         .await
-        .map_err(|e| AppError::Other(format!("the backup task failed: {e}")))??;
+        .map_err(|e| AppError::internal("the backup", e))??;
     Ok((target, size))
 }
 
@@ -422,7 +422,7 @@ pub async fn preview(state: &AppState, backup_id: i64) -> AppResult<Vec<ArchiveE
     let path = PathBuf::from(backup.path);
     tokio::task::spawn_blocking(move || archive::list(&path))
         .await
-        .map_err(|e| AppError::Other(format!("reading the archive failed: {e}")))?
+        .map_err(|e| AppError::internal("reading the archive", e))?
 }
 
 /// Restores a backup over the instance.
@@ -489,7 +489,7 @@ where
     }
     handle
         .await
-        .map_err(|e| AppError::Other(format!("the restore task failed: {e}")))??;
+        .map_err(|e| AppError::internal("the restore", e))??;
 
     record_event(
         &state.db,

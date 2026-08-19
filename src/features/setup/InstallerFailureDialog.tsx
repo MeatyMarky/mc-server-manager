@@ -11,7 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { TaskDoneEvent } from "@/lib/types";
 
 /**
@@ -35,7 +36,7 @@ export function InstallerFailureDialog({
     try {
       setFullLog(await ipc.readInstallerLog(failure.logPath));
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 

@@ -164,23 +164,17 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         return Err(AppError::InstanceRunning(instance.name.clone()));
     }
     if instance.installed_at.is_none() && instance.launch_target.is_none() {
-        return Err(AppError::Other(format!(
-            "\"{}\" has no server installed yet",
-            instance.name
-        )));
+        return Err(AppError::NotInstalled(instance.name.clone()));
     }
     // The EULA gate is a hard stop: the server would refuse to boot anyway, and
     // silently writing eula.txt is exactly what this app never does.
     if !instance.eula_accepted {
-        return Err(AppError::Other(format!(
-            "the Minecraft EULA has not been accepted for \"{}\"",
-            instance.name
-        )));
+        return Err(AppError::EulaNotAccepted(instance.name.clone()));
     }
 
     let check = port::check(&state.db, instance.id, &dir, &state.live_uuids()).await?;
-    if let Some(message) = check.message() {
-        return Err(AppError::Other(message));
+    if let Some(err) = check.as_error() {
+        return Err(err);
     }
 
     // Scripts bring their own Java; everything else needs one we can name.
@@ -197,16 +191,32 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         if path.is_file() {
             return Ok(path);
         }
-        return Err(AppError::Other(format!(
-            "the Java pinned for \"{}\" is missing: {pinned}",
-            instance.name
-        )));
+        return Err(AppError::JavaPinnedMissing {
+            instance: instance.name.clone(),
+            path: pinned.clone(),
+        });
     }
 
-    java::best_for(&state.db, required)
+    if let Some(runtime) = java::best_for(&state.db, required).await? {
+        return Ok(PathBuf::from(runtime.path));
+    }
+
+    // "No Java at all" and "Java, but too old" have different fixes, and the
+    // second is the one that confuses people: they installed Java, so why is
+    // the app still complaining?
+    let newest = java::list(&state.db)
         .await?
-        .map(|runtime| PathBuf::from(runtime.path))
-        .ok_or(AppError::JavaNotFound { required })
+        .into_iter()
+        .map(|runtime| runtime.major)
+        .max();
+    Err(match newest {
+        Some(found) => AppError::JavaTooOld {
+            required,
+            found,
+            mc_version: instance.mc_version.clone(),
+        },
+        None => AppError::JavaNotFound { required },
+    })
 }
 
 /// Starts a server. Returns once the process is spawned; readiness arrives later

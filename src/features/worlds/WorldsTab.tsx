@@ -18,7 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes } from "@/lib/format";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView, World } from "@/lib/types";
 
 export function WorldsTab({ instance }: { instance: InstanceView }) {
@@ -86,7 +87,7 @@ export function WorldsTab({ instance }: { instance: InstanceView }) {
       void queryClient.invalidateQueries({ queryKey: ["properties", instance.id] });
       toast.success(`"${folder}" is now the active world`);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const remove = useMutation({
@@ -96,7 +97,7 @@ export function WorldsTab({ instance }: { instance: InstanceView }) {
       void queryClient.invalidateQueries({ queryKey: ["worlds", instance.id] });
       toast.success(`Deleted "${folder}"`);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   // Track which task belongs to which world, so its size lands on the right row.
@@ -114,7 +115,7 @@ export function WorldsTab({ instance }: { instance: InstanceView }) {
       setTaskWorld((current) => ({ ...current, [taskId]: folder }));
       setMeasuring((current) => ({ ...current, [taskId]: "Measuring…" }));
     } catch (error) {
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 
@@ -130,7 +131,7 @@ export function WorldsTab({ instance }: { instance: InstanceView }) {
       await ipc.worldExport(instance.id, folder, target);
     } catch (error) {
       setBusy(null);
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 
@@ -145,7 +146,7 @@ export function WorldsTab({ instance }: { instance: InstanceView }) {
       await ipc.worldImport(instance.id, archive, null);
     } catch (error) {
       setBusy(null);
-      toast.error(errorMessage(error));
+      toastError(error);
     }
   }
 

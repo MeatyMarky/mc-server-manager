@@ -18,7 +18,8 @@ import { Badge, Switch } from "@/components/ui/misc";
 import { MetricsPanel } from "@/features/metrics/MetricsPanel";
 import { onBackupsChanged, onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes } from "@/lib/format";
-import { errorMessage, ipc } from "@/lib/ipc";
+import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type {
   Backup,
   BackupOptions,
@@ -96,7 +97,7 @@ export function BackupsTab({ instance }: { instance: InstanceView }) {
       void queryClient.invalidateQueries({ queryKey: ["backups", instance.id] });
       toast.success("Backup deleted");
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const runSchedule = useMutation({
@@ -106,7 +107,7 @@ export function BackupsTab({ instance }: { instance: InstanceView }) {
       void queryClient.invalidateQueries({ queryKey: ["schedules", instance.id] });
       toast.success("Schedule run");
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const deleteSchedule = useMutation({
@@ -115,7 +116,7 @@ export function BackupsTab({ instance }: { instance: InstanceView }) {
       void queryClient.invalidateQueries({ queryKey: ["schedules", instance.id] });
       toast.success("Schedule removed");
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const rows = sortForDisplay(backups.data ?? []);
@@ -297,7 +298,7 @@ function CreateDialog({
       onStarted();
       onOpenChange(false);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const warning = spaceWarning(check.data);
@@ -419,7 +420,7 @@ function RestoreDialog({
       onStarted();
       onOpenChange(false);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   const entries = preview.data ?? [];
@@ -550,7 +551,7 @@ function ScheduleDialog({
       toast.success("Schedule saved");
       onOpenChange(false);
     },
-    onError: (error: unknown) => toast.error(errorMessage(error)),
+    onError: (error: unknown) => toastError(error),
   });
 
   return (

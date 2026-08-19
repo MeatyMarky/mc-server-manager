@@ -433,7 +433,7 @@ async fn merge_dir(from: &Path, to: &Path) -> AppResult<()> {
         Ok(())
     })
     .await
-    .map_err(|e| AppError::Other(format!("merge task failed: {e}")))?
+    .map_err(|e| AppError::internal("merging the installed files", e))?
 }
 
 async fn record_artifact(state: &AppState, artifact: &Artifact, path: &Path) -> AppResult<()> {

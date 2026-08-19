@@ -68,11 +68,28 @@ export type { VersionEntry } from "./bindings/VersionEntry";
 export type { UpdateInstanceInput } from "./bindings/UpdateInstanceInput";
 
 /// The shape every rejected Tauri command produces (see AppError in Rust).
+///
+/// `message` is written for a person; `technical` is the developer text kept
+/// behind a "details" expander. Never show `technical` on its own.
 export interface AppErrorShape {
   kind: string;
   message: string;
+  /// What to do about it, when there is something to do.
+  hint?: string | null;
+  /// The Display text of the Rust error, for bug reports.
+  technical?: string | null;
   /// Extra payload for errors that carry one, e.g. installer logs.
-  detail?: { logPath?: string; logTail?: string; required?: number } | null;
+  detail?: {
+    logPath?: string;
+    logTail?: string;
+    required?: number;
+    found?: number;
+    mcVersion?: string;
+    port?: number;
+    takenBy?: string | null;
+    host?: string;
+    retryAfterSeconds?: number;
+  } | null;
 }
 
 // Phase 6: backups, schedules and resource metrics.
@@ -88,3 +105,9 @@ export type { ScheduleInput } from "./bindings/ScheduleInput";
 export type { Scope } from "./bindings/Scope";
 export type { SpaceCheck } from "./bindings/SpaceCheck";
 export type { Window as MetricsWindow } from "./bindings/Window";
+
+// Phase 7: about, first-run readiness and the problem report.
+export type { BuildInfo } from "./bindings/BuildInfo";
+export type { Readiness } from "./bindings/Readiness";
+export type { ReportPart } from "./bindings/ReportPart";
+export type { ReportPreview } from "./bindings/ReportPreview";
