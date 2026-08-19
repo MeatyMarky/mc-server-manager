@@ -1,8 +1,8 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { useId } from "react";
 
 import { Button } from "@/components/ui/button";
+import { openExternal } from "@/lib/external";
 import type { InstanceView } from "@/lib/types";
 import { useAcceptEula, useEula } from "./queries";
 
@@ -61,7 +61,7 @@ export function EulaCard({ instance }: { instance: InstanceView }) {
           </span>
         </label>
 
-        <Button variant="outline" size="sm" onClick={() => void openUrl(status.url)}>
+        <Button variant="outline" size="sm" onClick={() => void openExternal(status.url)}>
           <ExternalLink /> Read the EULA
         </Button>
       </div>

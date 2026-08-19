@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { CheckCircle2, ExternalLink, KeyRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -8,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ipc } from "@/lib/ipc";
+import { openExternal } from "@/lib/external";
 import { toastError } from "@/lib/toast";
 
 const SETTING = "curseforge_api_key";
@@ -89,7 +89,7 @@ export function CurseForgeKey() {
           </Button>
         ) : null}
         {curseforge?.setupUrl ? (
-          <Button size="sm" variant="outline" onClick={() => void openUrl(curseforge.setupUrl!)}>
+          <Button size="sm" variant="outline" onClick={() => void openExternal(curseforge.setupUrl!)}>
             <ExternalLink /> Get a key
           </Button>
         ) : null}

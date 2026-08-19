@@ -1,7 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Boxes,
   CheckCircle2,
@@ -31,6 +30,7 @@ import { newestFirst, versionLabel } from "@/features/mods/versions";
 import { onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes } from "@/lib/format";
 import { ipc } from "@/lib/ipc";
+import { openExternal } from "@/lib/external";
 import { toastError } from "@/lib/toast";
 import type { Project, SortBy, SourceId } from "@/lib/types";
 
@@ -162,7 +162,7 @@ export function PackBrowser({ onInstalled }: { onInstalled: (instanceId: number)
               size="sm"
               variant="outline"
               className="mt-2"
-              onClick={() => void openUrl(selected.setupUrl!)}
+              onClick={() => void openExternal(selected.setupUrl!)}
             >
               <ExternalLink /> Get a key
             </Button>

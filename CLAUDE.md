@@ -434,6 +434,19 @@ Do not hand-edit it.
   content above scrolls. The open animation may only animate `opacity` and `scale`:
   animating `transform` stacks with Tailwind's `translate` centring and pushes the dialog
   off screen.
+- **A dialog's sticky footer must not shorten the scroll area.** `DialogContent` carries
+  `px-6 pt-6 pb-0` and the footer supplies `pb-6`: a negative bottom margin on a sticky
+  footer removes exactly that much from the scroll height, and the last line of content ends
+  up underneath it with nowhere left to scroll (measured: 8px of "1 file to download · 2.4 MB"
+  hidden at 1000x700).
+- **External addresses go through `lib/external.ts`.** One helper, awaited, http and https
+  only, and it reports a failure instead of swallowing it — `void openUrl(...)` turned a
+  missing opener scope into a dead button everywhere at once. The opener capability needs
+  `opener:default` *and* a URL scope; `opener:allow-open-url` on its own grants the command
+  with nothing it is allowed to open.
+- `src/components/ui/layout.test.ts` checks these rules across every `.tsx` file: a capped
+  height with no overflow, a `flex-1` scroll area that cannot shrink, a dialog footer with a
+  negative margin, and any address opened by a route other than the helper.
 - **The console's autoscroll releases on a user scroll and only on a user scroll.** The jump
   to the bottom sets a flag that the next scroll event clears, because the browser delivers
   that event a frame later and it is otherwise indistinguishable from the user returning —

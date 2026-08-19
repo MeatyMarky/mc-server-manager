@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Bug, Code2, ExternalLink, Package, Scale } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -18,6 +17,7 @@ import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { ErrorNotice } from "@/components/ui/ErrorNotice";
 import { ipc } from "@/lib/ipc";
+import { openExternal } from "@/lib/external";
 import type { InstanceView, Project, SourceVersion } from "@/lib/types";
 
 import { compactCount, relativeTime } from "./browser";
@@ -111,17 +111,17 @@ export function ModDetailDialog({
             </span>
           ) : null}
           {full?.pageUrl ? (
-            <Button size="sm" variant="ghost" onClick={() => void openUrl(full.pageUrl!)}>
+            <Button size="sm" variant="ghost" onClick={() => void openExternal(full.pageUrl!)}>
               <ExternalLink /> Project page
             </Button>
           ) : null}
           {full?.sourceUrl ? (
-            <Button size="sm" variant="ghost" onClick={() => void openUrl(full.sourceUrl!)}>
+            <Button size="sm" variant="ghost" onClick={() => void openExternal(full.sourceUrl!)}>
               <Code2 /> Source
             </Button>
           ) : null}
           {full?.issuesUrl ? (
-            <Button size="sm" variant="ghost" onClick={() => void openUrl(full.issuesUrl!)}>
+            <Button size="sm" variant="ghost" onClick={() => void openExternal(full.issuesUrl!)}>
               <Bug /> Issues
             </Button>
           ) : null}

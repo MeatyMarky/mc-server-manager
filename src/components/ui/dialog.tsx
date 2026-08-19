@@ -26,7 +26,12 @@ export function DialogContent({
           // A tall dialog scrolls inside itself rather than growing past the
           // window: `max-h` plus `overflow-y-auto`, with `overscroll-contain`
           // so reaching the end does not start scrolling whatever is behind it.
-          "fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-6 shadow-lg",
+          // The bottom padding belongs to the footer, not to this box: a
+          // sticky footer with a negative bottom margin shortens the scroll
+          // height by exactly that margin, and the last line of content ends up
+          // underneath it with no way to scroll to it. Each side is stated
+          // explicitly so no shorthand/longhand ordering decides it.
+          "fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card px-6 pt-6 pb-0 shadow-lg",
           className,
         )}
         {...props}
@@ -55,7 +60,9 @@ export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLD
       // away with it would leave no way to confirm or cancel without scrolling
       // blindly to the bottom first.
       className={cn(
-        "sticky bottom-0 -mx-6 -mb-6 flex flex-col-reverse gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end",
+        // Full-bleed and sticky, and it carries the dialog's bottom padding so
+        // the scroll area really ends where the content does.
+        "sticky bottom-0 -mx-6 flex flex-col-reverse gap-2 border-t border-border bg-card px-6 pb-6 pt-4 sm:flex-row sm:justify-end",
         className,
       )}
       {...props}

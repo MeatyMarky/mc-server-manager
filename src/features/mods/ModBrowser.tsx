@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { ChevronLeft, ChevronRight, ExternalLink, Package, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -9,6 +8,7 @@ import { ErrorNotice } from "@/components/ui/ErrorNotice";
 import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { ipc } from "@/lib/ipc";
+import { openExternal } from "@/lib/external";
 import type {
   ContentType,
   ContentTypeOption,
@@ -210,7 +210,7 @@ export function ModBrowser({
               size="sm"
               variant="outline"
               className="mt-2"
-              onClick={() => void openUrl(selected.setupUrl!)}
+              onClick={() => void openExternal(selected.setupUrl!)}
             >
               <ExternalLink /> Get a key
             </Button>
@@ -329,7 +329,7 @@ function ProjectCard({
           Versions…
         </Button>
         {project.pageUrl ? (
-          <Button size="sm" variant="ghost" onClick={() => void openUrl(project.pageUrl!)}>
+          <Button size="sm" variant="ghost" onClick={() => void openExternal(project.pageUrl!)}>
             <ExternalLink /> Page
           </Button>
         ) : null}

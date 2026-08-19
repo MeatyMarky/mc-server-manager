@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { CheckCircle2, Download, FolderSearch, Loader2, Plus, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ipc } from "@/lib/ipc";
+import { openExternal } from "@/lib/external";
 
 const JDK_URL = "https://adoptium.net/temurin/releases/";
 
@@ -32,7 +32,7 @@ export function FirstRun({
   const ready = readiness.data;
 
   return (
-    <div className="flex flex-1 items-center justify-center overflow-y-auto p-8">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto overscroll-contain p-8">
       <div className="w-full max-w-xl space-y-6">
         <header className="text-center">
           <h2 className="text-xl font-semibold">Set up your first server</h2>
@@ -60,7 +60,7 @@ export function FirstRun({
             <>
               <p className="mt-2 text-muted-foreground">{ready.warning}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => void openUrl(JDK_URL)}>
+                <Button size="sm" variant="outline" onClick={() => void openExternal(JDK_URL)}>
                   <Download /> Get a JDK
                 </Button>
                 <Button
