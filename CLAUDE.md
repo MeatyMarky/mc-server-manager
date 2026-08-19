@@ -236,6 +236,13 @@ Vanilla, Paper, Forge (log4j plus a logger bracket) and Fabric (a parenthesised 
 print differently, and `logparse` handles each; unparsable lines are still shown verbatim.
 Test any parser change against the recorded samples in `tests/fixtures/log_*.txt`.
 
+A line that declares its own level keeps it, whatever stream it arrived on: the JVM writes
+`WARNING: ...` to stderr and Minecraft 26 prints eight of them about `sun.misc.Unsafe` on
+every start, so classifying by stream alone painted a normal boot red. `declared_level`
+reads a level word followed by a colon at the start of the line, and the stream is only the
+fallback for a line that says nothing about itself (a stack trace, the `Failed to add PDH
+Counter` noise). A recognised bracketed format always wins over both.
+
 ### `server.properties`
 It is a **Java properties file**, not `key=value` lines: `:` separates too, whitespace can
 separate, backslashes escape, `\uXXXX` encodes any character, and a trailing backslash

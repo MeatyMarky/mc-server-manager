@@ -183,7 +183,12 @@ pub fn parse_line(raw: &str, stderr: bool) -> (Option<String>, LogLevel, Option<
     }
 
     let Some((first, rest)) = take_bracketed(trimmed, '[', ']') else {
-        return (None, default_level(stderr), None, line.to_string());
+        return (
+            None,
+            unformatted_level(trimmed, stderr),
+            None,
+            line.to_string(),
+        );
     };
 
     // Paper: [12:34:56 INFO]: message
@@ -201,17 +206,23 @@ pub fn parse_line(raw: &str, stderr: bool) -> (Option<String>, LogLevel, Option<
     }
 
     if !is_timestamp(first) {
-        return (None, default_level(stderr), None, line.to_string());
+        return (
+            None,
+            unformatted_level(trimmed, stderr),
+            None,
+            line.to_string(),
+        );
     }
     let timestamp = Some(first.to_string());
 
     // Vanilla/Forge/Fabric: [12:34:56] [thread/LEVEL] [logger]: message
     let Some((second, mut rest)) = take_bracketed(rest, '[', ']') else {
+        let message = rest.trim_start_matches(':').trim().to_string();
         return (
             timestamp,
-            default_level(stderr),
+            unformatted_level(&message, stderr),
             None,
-            rest.trim_start_matches(':').trim().to_string(),
+            message,
         );
     };
 
@@ -246,12 +257,44 @@ pub fn parse_line(raw: &str, stderr: bool) -> (Option<String>, LogLevel, Option<
     )
 }
 
+/// The level of a line that carries no recognised log format.
+///
+/// A line's own words come first: the JVM writes `WARNING: ...` and
+/// `ERROR: ...` to stderr, and every one of those was being shown as an error
+/// purely because of the stream it arrived on — the `sun.misc.Unsafe`
+/// deprecation notices Minecraft 26 prints on every start are warnings that
+/// say so. The stream is only a fallback for a line that declares nothing.
 fn default_level(stderr: bool) -> LogLevel {
     if stderr {
         LogLevel::Error
     } else {
         LogLevel::Raw
     }
+}
+
+/// The level a bare line declares about itself, if any.
+///
+/// Matches the shape the JVM and `java.util.logging` use — a level word, then a
+/// colon, at the very start of the line. Anything further in is prose: "the
+/// error was handled" is not an error line.
+pub fn declared_level(line: &str) -> Option<LogLevel> {
+    let trimmed = line.trim_start();
+    let (word, rest) = trimmed.split_once(':')?;
+    if word.is_empty() || word.len() > 8 || word.contains(char::is_whitespace) {
+        return None;
+    }
+    // "WARNING:" with nothing after it is still a warning; "WARNING:foo" is not
+    // a log line shape this app should reinterpret.
+    if !(rest.is_empty() || rest.starts_with(' ')) {
+        return None;
+    }
+    LogLevel::parse(word)
+}
+
+/// The level for a line no format matched: what it says about itself, then the
+/// stream it came from.
+fn unformatted_level(line: &str, stderr: bool) -> LogLevel {
+    declared_level(line).unwrap_or_else(|| default_level(stderr))
 }
 
 fn parse_log4j(line: &str) -> Option<(Option<String>, LogLevel, Option<String>, String)> {
@@ -676,5 +719,87 @@ versions up to 61.0";
         // A mention with no numbers in it cannot be translated, so it is not
         // claimed as one.
         assert!(parse_class_version_error("UnsupportedClassVersionError somewhere").is_none());
+    }
+
+    #[test]
+    fn a_jvm_warning_on_stderr_is_a_warning_not_an_error() {
+        // Minecraft 26 prints these on every start, and every one of them was
+        // being shown in red because it arrived on stderr.
+        let fixture = include_str!("../../tests/fixtures/log_jvm_stderr.txt");
+        let unsafe_line = fixture
+            .lines()
+            .find(|line| line.contains("sun.misc.Unsafe::objectFieldOffset has been called"))
+            .expect("the fixture has the deprecation notice");
+
+        let (_, level, _, message) = parse_line(unsafe_line, true);
+        assert_eq!(level, LogLevel::Warn, "{unsafe_line}");
+        // The whole line is kept: the prefix is part of what the JVM said.
+        assert!(message.contains("sun.misc.Unsafe"), "{message}");
+
+        // Every WARNING: line in the fixture, on stderr, is a warning.
+        for line in fixture.lines().filter(|line| line.starts_with("WARNING:")) {
+            let (_, level, _, _) = parse_line(line, true);
+            assert_eq!(level, LogLevel::Warn, "{line}");
+        }
+    }
+
+    #[test]
+    fn the_jvms_own_error_prefix_still_reads_as_an_error() {
+        let (_, level, _, _) = parse_line("ERROR: could not create the Java Virtual Machine", true);
+        assert_eq!(level, LogLevel::Error);
+
+        // And on stdout, where the stream says nothing.
+        let (_, level, _, _) = parse_line("SEVERE: something went wrong", false);
+        assert_eq!(level, LogLevel::Error);
+        let (_, level, _, _) = parse_line("INFO: starting up", false);
+        assert_eq!(level, LogLevel::Info);
+    }
+
+    #[test]
+    fn a_stderr_line_that_declares_nothing_still_falls_back_to_the_stream() {
+        // The PDH counter noise and a bare stack trace line say nothing about
+        // themselves, so the stream is all there is to go on.
+        let fixture = include_str!("../../tests/fixtures/log_jvm_stderr.txt");
+        for line in fixture
+            .lines()
+            .filter(|line| line.starts_with("Failed to add PDH Counter"))
+        {
+            let (_, level, _, _) = parse_line(line, true);
+            assert_eq!(level, LogLevel::Error, "{line}");
+            let (_, level, _, _) = parse_line(line, false);
+            assert_eq!(level, LogLevel::Raw, "on stdout it is unclassified: {line}");
+        }
+
+        let trace = "com.sun.jna.platform.win32.Win32Exception: The parameter is incorrect.";
+        assert_eq!(parse_line(trace, true).1, LogLevel::Error);
+    }
+
+    #[test]
+    fn prose_is_not_mistaken_for_a_level_prefix() {
+        // Only a level word followed by a colon at the start of the line counts.
+        for line in [
+            "Loading libraries, please wait...",
+            "warning signs are placed near spawn",
+            "WARNING",
+            "WARNINGS: two of them",
+            "http://example.com/warning: not a level",
+        ] {
+            let (_, level, _, _) = parse_line(line, false);
+            assert_eq!(level, LogLevel::Raw, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_formatted_line_still_takes_its_level_from_the_format() {
+        // The bracketed format is unambiguous and must not be second-guessed by
+        // anything the message happens to contain.
+        let (_, level, _, message) =
+            parse_line("[17:15:57] [main/ERROR]: Unable to locate English counter names", true);
+        assert_eq!(level, LogLevel::Error);
+        assert!(message.starts_with("Unable to locate"));
+
+        let (_, level, _, _) =
+            parse_line("[17:15:57] [Server thread/INFO]: WARNING: this is the message", false);
+        assert_eq!(level, LogLevel::Info, "the format wins over words in the message");
     }
 }
