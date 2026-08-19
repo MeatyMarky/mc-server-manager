@@ -25,6 +25,9 @@ pub struct AppInfo {
 pub async fn app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
     let default_root = db::setting_get(&state.db, "default_instance_root")
         .await?
+        // Settings clears the override by storing an empty string, which is
+        // still a row: an empty root would be a path of nothing at all.
+        .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| {
             state
                 .data_dir

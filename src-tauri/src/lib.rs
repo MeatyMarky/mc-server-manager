@@ -180,6 +180,7 @@ pub fn run() {
             commands::setup::eula_set,
             commands::setup::read_installer_log,
             commands::java::java_list,
+            commands::java::java_scan_info,
             commands::java::java_rescan,
             commands::java::java_add_manual,
             commands::java::java_status,

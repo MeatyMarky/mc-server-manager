@@ -29,6 +29,27 @@ pub struct JavaStatus {
     pub scan_is_stale: bool,
 }
 
+/// When detection last ran, without asking about a particular instance.
+///
+/// App settings show the detected list before any instance exists, so the age
+/// of that list cannot be read out of one instance's status.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct ScanInfo {
+    pub last_scan_at: Option<String>,
+    pub scan_is_stale: bool,
+}
+
+#[tauri::command]
+pub async fn java_scan_info(state: State<'_, AppState>) -> AppResult<ScanInfo> {
+    let last_scan_at = java::last_scan_at(&state.db).await?;
+    Ok(ScanInfo {
+        scan_is_stale: java::scan_is_stale(last_scan_at.as_deref(), chrono::Utc::now()),
+        last_scan_at,
+    })
+}
+
 #[tauri::command]
 pub async fn java_list(state: State<'_, AppState>) -> AppResult<Vec<JavaRuntime>> {
     java::list(&state.db).await

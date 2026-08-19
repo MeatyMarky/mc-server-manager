@@ -23,6 +23,7 @@ export type { InstanceView } from "./bindings/InstanceView";
 export type { JavaRuntime } from "./bindings/JavaRuntime";
 export type { JavaSource } from "./bindings/JavaSource";
 export type { JavaStatus } from "./bindings/JavaStatus";
+export type { ScanInfo } from "./bindings/ScanInfo";
 export type { InstallPlan } from "./bindings/InstallPlan";
 export type { InstalledMod } from "./bindings/InstalledMod";
 export type { JarMetadata } from "./bindings/JarMetadata";

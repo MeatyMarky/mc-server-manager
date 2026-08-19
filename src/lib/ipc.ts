@@ -24,6 +24,7 @@ import type {
   EulaStatus,
   JavaRuntime,
   JavaStatus,
+  ScanInfo,
   InstallPlan,
   KeyInfo,
   Category,
@@ -151,6 +152,7 @@ export const ipc = {
     invoke<EulaStatus>("eula_set", { id, accepted }),
 
   javaList: () => invoke<JavaRuntime[]>("java_list"),
+  javaScanInfo: () => invoke<ScanInfo>("java_scan_info"),
   javaRescan: () => invoke<JavaRuntime[]>("java_rescan"),
   javaAddManual: (path: string) => invoke<JavaRuntime>("java_add_manual", { path }),
   javaStatus: (id: number) => invoke<JavaStatus>("java_status", { id }),

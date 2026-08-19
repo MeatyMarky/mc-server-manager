@@ -93,6 +93,7 @@ pub async fn schema_version(state: &AppState) -> Option<i64> {
 pub async fn build_info(state: &AppState) -> AppResult<BuildInfo> {
     let instance_root = crate::db::setting_get(&state.db, "default_instance_root")
         .await?
+        .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| state.data_dir.join("instances").to_string_lossy().to_string());
 
     Ok(BuildInfo {

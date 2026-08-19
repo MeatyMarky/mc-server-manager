@@ -1,4 +1,4 @@
-import { Boxes, HelpCircle, Info, Moon, Sun } from "lucide-react";
+import { Boxes, HelpCircle, Info, Moon, Settings, Sun } from "lucide-react";
 import { useEffect } from "react";
 import { Toaster } from "sonner";
 
@@ -12,6 +12,7 @@ import { CreateInstanceDialog } from "@/features/instances/CreateInstanceDialog"
 import { ImportInstanceDialog } from "@/features/instances/ImportInstanceDialog";
 import { InstanceSidebar } from "@/features/instances/InstanceSidebar";
 import { PackBrowser } from "@/features/packs/PackBrowser";
+import { AppSettings } from "@/features/settings/AppSettings";
 import { useInstanceEvents, useInstances } from "@/features/instances/queries";
 import { ipc } from "@/lib/ipc";
 import { applyTheme, useUiStore, type Theme } from "@/stores/ui";
@@ -23,9 +24,9 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [about, setAbout] = useState(false);
-  // Packs are browsed on their own: installing one creates a server, so it
-  // belongs beside the instance list rather than inside an instance.
-  const [browsingPacks, setBrowsingPacks] = useState(false);
+  // What fills the main pane. Packs and app settings are not about one server,
+  // so they replace the instance view rather than hiding inside it.
+  const [view, setView] = useState<"instance" | "packs" | "settings">("instance");
   const [reporting, setReporting] = useState(false);
 
   useInstanceEvents();
@@ -69,12 +70,24 @@ export default function App() {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-end gap-1 px-6 pt-4">
           <Button
-            variant={browsingPacks ? "default" : "ghost"}
+            variant={view === "packs" ? "default" : "ghost"}
             size="sm"
             className="mr-auto"
-            onClick={() => setBrowsingPacks((current) => !current)}
+            onClick={() => setView((current) => (current === "packs" ? "instance" : "packs"))}
           >
             <Boxes /> Browse packs
+          </Button>
+          <Button
+            variant={view === "settings" ? "default" : "ghost"}
+            size="icon"
+            onClick={() =>
+              setView((current) => (current === "settings" ? "instance" : "settings"))
+            }
+            aria-label="Settings"
+            aria-pressed={view === "settings"}
+            title="Settings"
+          >
+            <Settings />
           </Button>
           <Button
             variant="ghost"
@@ -104,10 +117,15 @@ export default function App() {
           </Button>
         </div>
 
-        {browsingPacks ? (
+        {view === "settings" ? (
+          <AppSettings
+            onAbout={() => setAbout(true)}
+            onReportProblem={() => setReporting(true)}
+          />
+        ) : view === "packs" ? (
           <PackBrowser
             onInstalled={(instanceId) => {
-              setBrowsingPacks(false);
+              setView("instance");
               selectInstance(instanceId);
             }}
           />
