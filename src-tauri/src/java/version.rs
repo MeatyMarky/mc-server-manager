@@ -173,6 +173,58 @@ OpenJDK Server VM Zulu17.46+19-CA (build 17.0.9+8-LTS, mixed mode)"#;
         assert!(info.is_jdk);
     }
 
+    /// Oracle's two shim directories, recorded from this machine.
+    ///
+    /// `Common Files\\Oracle\\Java\\javapath\\java.exe` is 64-bit and
+    /// `Common Files\\Oracle\\Java\\java8path\\java.exe` is 32-bit — different
+    /// folder names, the same file name, and neither says which is which. The
+    /// `(x86)` in one path is not a signal either: a 32-bit JRE installs a shim
+    /// under the 64-bit Program Files as well.
+    const ORACLE_SHIMS: [(&str, &str); 2] = [
+        (
+            r"C:\Program Files\Common Files\Oracle\Java\javapath\java.exe",
+            include_str!("../../tests/fixtures/java_version_oracle_shim_x64.txt"),
+        ),
+        (
+            r"C:\Program Files (x86)\Common Files\Oracle\Java\java8path\java.exe",
+            include_str!("../../tests/fixtures/java_version_oracle_shim_x86.txt"),
+        ),
+    ];
+
+    #[test]
+    fn the_oracle_shims_are_told_apart_by_what_they_print_not_by_their_paths() {
+        let [(path_64, output_64), (path_32, output_32)] = ORACLE_SHIMS;
+
+        assert_eq!(parse_java_version(output_64).unwrap().bits, 64);
+        assert_eq!(parse_java_version(output_32).unwrap().bits, 32);
+
+        // Both binaries are called java.exe and both live under "Common
+        // Files\Oracle\Java": nothing in the path distinguishes them.
+        assert!(path_64.ends_with(r"\java.exe") && path_32.ends_with(r"\java.exe"));
+        assert!(path_64.contains(r"Common Files\Oracle\Java"));
+        assert!(path_32.contains(r"Common Files\Oracle\Java"));
+
+        // The shortcut this test exists to prevent: guessing from the path.
+        // "(x86)" happens to line up here and does not in general — a 32-bit JRE
+        // also installs a shim under the 64-bit Program Files — so any code that
+        // reads a width out of a path is wrong even when it looks right.
+        for (path, output) in ORACLE_SHIMS {
+            let from_output = parse_java_version(output).unwrap().bits;
+            let from_path = if path.contains("(x86)") { 32 } else { 64 };
+            assert_eq!(
+                from_output, from_path,
+                "this machine happens to agree — the point is that only {from_output} was read \
+                 from the binary, and {from_path} was a guess"
+            );
+            assert_eq!(from_output, bits_from_output(output));
+        }
+
+        // And the versions differ too, which is the other half of why the shim
+        // that PATH resolves to is not the one a user assumes.
+        assert_eq!(parse_java_version(output_64).unwrap().major, 26);
+        assert_eq!(parse_java_version(output_32).unwrap().major, 8);
+    }
+
     #[test]
     fn bitness_comes_from_the_vm_line_and_its_absence_means_32() {
         // Every 64-bit build says so; nothing else does.

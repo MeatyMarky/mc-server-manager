@@ -17,4 +17,12 @@ pinnedPath: string | null, pinnedValid: boolean,
 /**
  * True when nothing installed satisfies the requirement.
  */
-mismatch: boolean, message: string | null, };
+mismatch: boolean, message: string | null, 
+/**
+ * When detection last ran, so the picker can say how old its list is.
+ */
+lastScanAt: string | null, 
+/**
+ * True once that scan is old enough that a new JDK could be missing.
+ */
+scanIsStale: boolean, };

@@ -59,6 +59,23 @@ pub fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// Problems SQLite reports with its own file, empty when the database is sound.
+///
+/// `quick_check` is the cheap half of `integrity_check`: it verifies the tables
+/// and their indexes without the full page walk, which is what matters here —
+/// a broken unique index makes `ON CONFLICT` update the wrong row and makes
+/// `COUNT(*)` disagree with a table scan, and both look like the app losing
+/// track of things rather than like a damaged file.
+pub async fn integrity_problems(pool: &SqlitePool) -> AppResult<Vec<String>> {
+    let rows: Vec<String> = sqlx::query_scalar("PRAGMA quick_check")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|row| !row.eq_ignore_ascii_case("ok"))
+        .collect())
+}
+
 pub async fn setting_get(pool: &SqlitePool, key: &str) -> AppResult<Option<String>> {
     let value: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?")
         .bind(key)
@@ -145,5 +162,15 @@ mod tests {
             Some("light".to_string())
         );
         assert_eq!(settings_all(&pool).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_healthy_database_reports_no_problems() {
+        let pool = connect_in_memory().await.unwrap();
+        assert!(integrity_problems(&pool).await.unwrap().is_empty());
+
+        // And it stays quiet with data in it.
+        setting_set(&pool, "theme", "dark").await.unwrap();
+        assert!(integrity_problems(&pool).await.unwrap().is_empty());
     }
 }

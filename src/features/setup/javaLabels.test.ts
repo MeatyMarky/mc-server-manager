@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { JavaRuntime } from "@/lib/types";
 
-import { isUsable, runtimeLabel, unsuitableReason } from "./javaLabels";
+import { isUsable, runtimeLabel, scanAgeLabel, unsuitableReason } from "./javaLabels";
 
 function runtime(overrides: Partial<JavaRuntime> = {}): JavaRuntime {
   return {
@@ -55,5 +55,26 @@ describe("java runtime labels", () => {
     const broken = runtime({ valid: false, bits: null });
     expect(isUsable(broken)).toBe(false);
     expect(unsuitableReason(broken)).toBe("did not answer -version");
+  });
+});
+
+describe("scan age", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  it("says how old the detected list is", () => {
+    expect(scanAgeLabel(minutesAgo(0))).toBe("Scanned just now");
+    expect(scanAgeLabel(minutesAgo(1))).toBe("Scanned 1 minute ago");
+    expect(scanAgeLabel(minutesAgo(45))).toBe("Scanned 45 minutes ago");
+    expect(scanAgeLabel(minutesAgo(60))).toBe("Scanned 1 hour ago");
+    expect(scanAgeLabel(minutesAgo(60 * 26))).toBe("Scanned 1 day ago");
+    expect(scanAgeLabel(minutesAgo(60 * 24 * 3))).toBe("Scanned 3 days ago");
+  });
+
+  it("distinguishes never scanned from an unreadable timestamp", () => {
+    // A JDK installed after the last scan is missing from the list either way,
+    // but the two states need different words.
+    expect(scanAgeLabel(null)).toBe("Java has not been scanned yet");
+    expect(scanAgeLabel("whenever")).toBe("Last scan time unknown");
   });
 });

@@ -238,12 +238,16 @@ pub async fn preview(
     let info = build_info(state).await?;
     let mut parts = Vec::new();
 
+    let integrity = crate::db::integrity_problems(&state.db)
+        .await
+        .unwrap_or_else(|err| vec![format!("the check itself failed: {err}")]);
+
     parts.push(ReportPart {
         name: "about.txt".into(),
         purpose: "Which build this is, and where its files live.".into(),
         content: format!(
             "Minecraft Server Manager {}\ncommit: {}\nplatform: {} ({})\nschema version: {}\n\
-             database: {}\nlogs: {}\ninstance root: {}\ngenerated: {}\n",
+             database: {}\nlogs: {}\ninstance root: {}\ndatabase health: {}\ngenerated: {}\n",
             info.version,
             info.git_sha,
             info.platform,
@@ -254,6 +258,11 @@ pub async fn preview(
             info.db_path,
             info.log_dir,
             info.instance_root,
+            if integrity.is_empty() {
+                "ok".to_string()
+            } else {
+                format!("{} problem(s): {}", integrity.len(), integrity.join("; "))
+            },
             now_rfc3339(),
         ),
     });

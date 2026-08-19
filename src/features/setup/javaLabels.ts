@@ -28,3 +28,27 @@ export function runtimeLabel(runtime: JavaRuntime): string {
   const reason = unsuitableReason(runtime);
   return reason ? `${parts.join(" · ")} — ${reason}` : parts.join(" · ");
 }
+
+/**
+ * How old the detected list is, in words.
+ *
+ * A JDK installed after the last scan is simply absent from the picker, and
+ * that is impossible to work out from a list that looks complete — so the list
+ * says when it was built.
+ */
+export function scanAgeLabel(lastScanAt: string | null): string {
+  if (!lastScanAt) return "Java has not been scanned yet";
+
+  const at = new Date(lastScanAt);
+  if (Number.isNaN(at.getTime())) return "Last scan time unknown";
+
+  const minutes = Math.floor((Date.now() - at.getTime()) / 60_000);
+  if (minutes < 1) return "Scanned just now";
+  if (minutes < 60) return `Scanned ${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Scanned ${hours} hour${hours === 1 ? "" : "s"} ago`;
+
+  const days = Math.floor(hours / 24);
+  return `Scanned ${days} day${days === 1 ? "" : "s"} ago`;
+}

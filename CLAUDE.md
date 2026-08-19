@@ -82,6 +82,26 @@ The per-version JSON at `piston-meta` states `javaVersion.majorVersion`, and tha
 install records. The table in `java/version.rs` is only the offline fallback (26.x needs
 Java 25, 1.20.5+ needs 21, 1.17+ needs 17, older needs 8).
 
+### Java detection: probe everything, trust no path, and do not trust an old scan
+Candidates come from `JAVA_HOME`, `PATH`, `CLASSPATH`, the registry, and the install roots —
+including Oracle's two shim folders (`Common Files\Oracle\Java\javapath` for the current
+JDK, `java8path` for the Java 8 line) and the per-user roots under
+`%LOCALAPPDATA%\Programs`. Both shims are called `java.exe`, they are different JVMs of
+different widths, and **nothing about a path says which** — `detect::resolve_shim`
+canonicalizes only to deduplicate, never to judge. The fixture pair in `java/version.rs`
+exists to keep the "read the width out of the path" shortcut from coming back.
+
+A cached scan older than `CACHE_MAX_AGE_HOURS` (24) is redone at launch
+(`java::rescan_if_stale`), and Settings shows when the list was built. A JDK installed after
+the last scan is otherwise invisible while the picker looks complete.
+
+### A corrupt database looks like the app forgetting things
+A damaged index makes `COUNT(*)` disagree with a table scan and makes `ON CONFLICT` update
+the wrong row — which reads as instances vanishing and as runtimes carrying another
+runtime's version. `db::integrity_problems` runs `PRAGMA quick_check` at startup; problems
+are logged at error level, go into the problem report, and the one disposable table
+(`java_runtimes`) is rebuilt from scratch.
+
 ### A 32-bit JVM is never chosen, and never launched with a big heap
 `java -version` prints "64-Bit Server VM" for a 64-bit build; the absence of that
 marker means 32-bit, and `java_runtimes.bits` records which. 32-bit runtimes are excluded
@@ -106,7 +126,8 @@ checked the same way.
 characters escaped, and that line goes to the log at info level and into the instance
 console before the process is spawned — along with the resolved binary, its recorded width
 and the effective heap. A JVM's own complaint names a flag but never what was passed to it,
-and `-Xmx8192M` and `-Xmx8192M` look identical in a console, so this is the first thing
+and `-Xmx8192M` and `-Xmx8192M
+` look identical in a console, so this is the first thing
 to read when a start fails.
 
 `launch::validate_args` then refuses a command line the JVM would only reject after

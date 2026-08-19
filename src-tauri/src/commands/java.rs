@@ -23,6 +23,10 @@ pub struct JavaStatus {
     /// True when nothing installed satisfies the requirement.
     pub mismatch: bool,
     pub message: Option<String>,
+    /// When detection last ran, so the picker can say how old its list is.
+    pub last_scan_at: Option<String>,
+    /// True once that scan is old enough that a new JDK could be missing.
+    pub scan_is_stale: bool,
 }
 
 #[tauri::command]
@@ -45,6 +49,8 @@ pub async fn java_add_manual(state: State<'_, AppState>, path: String) -> AppRes
 #[tauri::command]
 pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaStatus> {
     let instance = instance::get(&state.db, id).await?;
+    let last_scan_at = java::last_scan_at(&state.db).await?;
+    let scan_is_stale = java::scan_is_stale(last_scan_at.as_deref(), chrono::Utc::now());
     // Mojang's own metadata, recorded at install time, beats the fallback table.
     let required = instance
         .java_major
@@ -85,6 +91,8 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
                     pinned_path: Some(pinned),
                     pinned_valid: true,
                     mismatch: !version_ok || !width_ok,
+                    last_scan_at: last_scan_at.clone(),
+                    scan_is_stale,
                 }
             }
             None => JavaStatus {
@@ -96,6 +104,8 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
                 message: Some(format!(
                     "The pinned Java at {pinned} is not usable; pick another one."
                 )),
+                last_scan_at: last_scan_at.clone(),
+                scan_is_stale,
             },
         });
     }
@@ -128,6 +138,8 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
         selected: best,
         pinned_path: None,
         pinned_valid: true,
+        last_scan_at,
+        scan_is_stale,
     })
 }
 

@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { useUpdateInstance } from "@/features/instances/queries";
 import type { InstanceView } from "@/lib/types";
-import { isUsable, unsuitableReason } from "./javaLabels";
+import { isUsable, scanAgeLabel, unsuitableReason } from "./javaLabels";
 import { useAddJava, useJavaRuntimes, useJavaStatus, useRescanJava } from "./queries";
 
 /**
@@ -35,7 +35,18 @@ export function JavaSettings({ instance }: { instance: InstanceView }) {
     <section className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Java</h3>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {/* When the list was built. A JDK installed since then is not in it,
+              and nothing else on screen would give that away. */}
+          <span
+            className={
+              status.data?.scanIsStale
+                ? "text-xs text-[var(--status-starting)]"
+                : "text-xs text-muted-foreground"
+            }
+          >
+            {scanAgeLabel(status.data?.lastScanAt ?? null)}
+          </span>
           <Button
             type="button"
             variant="outline"

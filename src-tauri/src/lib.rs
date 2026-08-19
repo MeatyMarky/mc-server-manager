@@ -47,6 +47,26 @@ pub fn run() {
             tracing::info!(path = %db_path.display(), "opening database");
             let pool = tauri::async_runtime::block_on(db::connect(&db_path))?;
 
+            // A damaged database does not announce itself: a broken index makes
+            // COUNT(*) disagree with a table scan and makes ON CONFLICT update
+            // the wrong row, which reads as the app forgetting things. Say so
+            // loudly instead, and throw away the one table that is only a cache.
+            match tauri::async_runtime::block_on(db::integrity_problems(&pool)) {
+                Ok(problems) if problems.is_empty() => {}
+                Ok(problems) => {
+                    tracing::error!(
+                        count = problems.len(),
+                        first = %problems[0],
+                        "the database reports integrity problems; \
+                         rebuilding the Java cache and continuing"
+                    );
+                    if let Err(err) = tauri::async_runtime::block_on(java::rebuild_cache(&pool)) {
+                        tracing::warn!(error = %err, "could not rebuild the Java cache");
+                    }
+                }
+                Err(err) => tracing::warn!(error = %err, "could not check the database"),
+            }
+
             let state = AppState::new(pool.clone(), data_dir);
 
             // Orphan recovery has to happen before the UI paints, so the sidebar
@@ -70,16 +90,15 @@ pub fn run() {
             // One sampler and one scheduler for the whole app, whatever the
             // instance count. Both are started after `manage` below so they can
             // read the state; see the spawns further down.
-            // First run has no Java cached yet; detect in the background so the
-            // Settings tab and install flow have something to offer immediately.
+            // Detect in the background so the Settings tab and the install flow
+            // have something to offer immediately — and redo it when the cached
+            // list is a day old, because a JDK installed since the last scan is
+            // otherwise invisible until somebody presses Rescan.
             tauri::async_runtime::spawn(async move {
-                match java::list(&pool).await {
-                    Ok(known) if !known.is_empty() => {}
-                    Ok(_) => match java::rescan(&pool).await {
-                        Ok(found) => tracing::info!(count = found.len(), "detected Java runtimes"),
-                        Err(err) => tracing::warn!(error = %err, "initial Java detection failed"),
-                    },
-                    Err(err) => tracing::warn!(error = %err, "could not read the Java cache"),
+                match java::rescan_if_stale(&pool).await {
+                    Ok(true) => {}
+                    Ok(false) => tracing::debug!("Java cache is current"),
+                    Err(err) => tracing::warn!(error = %err, "Java detection failed"),
                 }
             });
             app.manage(state);

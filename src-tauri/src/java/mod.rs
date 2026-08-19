@@ -119,6 +119,59 @@ pub async fn bits_of(pool: &SqlitePool, path: &std::path::Path) -> Option<i64> {
         .and_then(|probe| probe.bits)
 }
 
+/// The setting holding when detection last ran.
+pub const SCANNED_AT: &str = "java_scanned_at";
+/// How long a scan is trusted before the next launch redoes it.
+pub const CACHE_MAX_AGE_HOURS: i64 = 24;
+
+/// When detection last ran, if it ever has.
+pub async fn last_scan_at(pool: &SqlitePool) -> AppResult<Option<String>> {
+    crate::db::setting_get(pool, SCANNED_AT).await
+}
+
+/// Whether the cached list is old enough to be worth rebuilding.
+///
+/// A JDK installed after the last scan is invisible until someone presses
+/// Rescan, and "the app is choosing from a list that predates the thing I just
+/// installed" is not a state a user can be expected to work out.
+pub fn scan_is_stale(last: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> bool {
+    let Some(last) = last else {
+        return true;
+    };
+    let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(last) else {
+        // An unreadable timestamp is not a reason to trust the cache forever.
+        return true;
+    };
+    now.signed_duration_since(parsed.with_timezone(&chrono::Utc))
+        >= chrono::Duration::hours(CACHE_MAX_AGE_HOURS)
+}
+
+/// Throws the detected list away and builds it again from scratch.
+///
+/// The table is a cache, so this is always safe — it exists for the case where
+/// the rows cannot be trusted at all, such as a database whose indexes SQLite
+/// reports as damaged.
+pub async fn rebuild_cache(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
+    sqlx::query("DELETE FROM java_runtimes").execute(pool).await?;
+    rescan(pool).await
+}
+
+/// Rescans when the cache is stale, and says whether it did.
+pub async fn rescan_if_stale(pool: &SqlitePool) -> AppResult<bool> {
+    let last = last_scan_at(pool).await?;
+    if !scan_is_stale(last.as_deref(), chrono::Utc::now()) {
+        return Ok(false);
+    }
+
+    let found = rescan(pool).await?;
+    tracing::info!(
+        count = found.len(),
+        previous_scan = last.as_deref().unwrap_or("never"),
+        "Java cache was stale; rescanned"
+    );
+    Ok(true)
+}
+
 /// Runs detection and replaces the cache. Returns everything now known.
 pub async fn rescan(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
     let cached = sqlx::query_as::<_, detect::CachedProbe>(
@@ -178,8 +231,9 @@ pub async fn rescan(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
     }
 
     // Recorded so the first-run screen can tell "no Java on this machine" apart
-    // from "detection has not run yet"; the two need different words.
-    crate::db::setting_set(pool, "java_scanned_at", &now).await?;
+    // from "detection has not run yet"; the two need different words. It is
+    // also what `scan_is_stale` reads and what Settings shows.
+    crate::db::setting_set(pool, SCANNED_AT, &now).await?;
 
     list(pool).await
 }
@@ -370,5 +424,44 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn a_cache_older_than_a_day_is_stale() {
+        let now = chrono::Utc::now();
+        let stamp = |hours: i64| (now - chrono::Duration::hours(hours)).to_rfc3339();
+
+        assert!(!scan_is_stale(Some(&stamp(1)), now), "an hour old is current");
+        assert!(!scan_is_stale(Some(&stamp(23)), now));
+        assert!(scan_is_stale(Some(&stamp(24)), now), "a day old is rescanned");
+        assert!(scan_is_stale(Some(&stamp(72)), now));
+
+        // Never scanned, and a timestamp nothing can read, both mean "look now".
+        assert!(scan_is_stale(None, now));
+        assert!(scan_is_stale(Some("last tuesday"), now));
+    }
+
+    #[tokio::test]
+    async fn a_stale_cache_is_rescanned_at_startup_and_a_current_one_is_not() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+
+        // Nothing recorded: the first launch scans.
+        assert!(rescan_if_stale(&pool).await.unwrap());
+        let first = last_scan_at(&pool).await.unwrap().expect("a timestamp");
+
+        // Immediately afterwards there is nothing to redo.
+        assert!(!rescan_if_stale(&pool).await.unwrap());
+        assert_eq!(last_scan_at(&pool).await.unwrap().as_deref(), Some(first.as_str()));
+
+        // A day later, the JDK installed in the meantime is worth looking for.
+        let long_ago = (chrono::Utc::now() - chrono::Duration::hours(30)).to_rfc3339();
+        crate::db::setting_set(&pool, SCANNED_AT, &long_ago).await.unwrap();
+
+        assert!(rescan_if_stale(&pool).await.unwrap());
+        let after = last_scan_at(&pool).await.unwrap().unwrap();
+        assert_ne!(after, long_ago, "the stamp moved to now");
+        // Second-resolution stamps can tie with the first scan of this test, so
+        // the check is that the cache is current again, not that the text moved.
+        assert!(!scan_is_stale(Some(&after), chrono::Utc::now()));
     }
 }

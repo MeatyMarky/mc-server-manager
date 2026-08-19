@@ -51,6 +51,15 @@ pub fn java_on_path() -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// Follows symlinks and junctions to the binary that will really run.
+///
+/// Used for identity, never for judgement: what a runtime *is* still comes from
+/// running it. `dunce` is used so a Windows path does not come back with the
+/// `\\?\` prefix, which would make it unrecognizable in the UI.
+pub fn resolve_shim(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
 pub fn java_executable_name() -> &'static str {
     if cfg!(windows) {
         "java.exe"
@@ -89,7 +98,33 @@ pub fn install_roots() -> Vec<PathBuf> {
                 roots.push(base.join("Amazon Corretto"));
                 roots.push(base.join("Zulu"));
                 roots.push(base.join("BellSoft"));
+                // Oracle's shims: `javapath` for the current JDK and `java8path`
+                // for the Java 8 line. Two different names for two different
+                // JVMs, both called java.exe, and on a 64-bit machine one of
+                // them is the 32-bit build — which is why nothing here may
+                // guess a runtime's width from where it sits.
+                roots.push(base.join("Common Files").join("Oracle").join("Java"));
             }
+        }
+
+        // Per-user installs: Adoptium and Microsoft both offer them, and
+        // JetBrains IDEs download JDKs here.
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let programs = PathBuf::from(local).join("Programs");
+            for vendor in [
+                "Eclipse Adoptium",
+                "Eclipse Foundation",
+                "Microsoft",
+                "Java",
+                "Zulu",
+                "Amazon Corretto",
+                "BellSoft",
+            ] {
+                roots.push(programs.join(vendor));
+            }
+        }
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            roots.push(PathBuf::from(profile).join(".jdks"));
         }
     } else {
         roots.push(PathBuf::from("/usr/lib/jvm"));
@@ -113,7 +148,10 @@ pub fn candidates() -> Vec<(PathBuf, JavaSource)> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
     let push = |path: PathBuf, source: JavaSource, found: &mut Vec<_>, seen: &mut BTreeSet<String>| {
-        let key = path.to_string_lossy().to_ascii_lowercase();
+        // Two entries can name the same binary through a symlink or a shim
+        // directory. The key is what it resolves to; the path kept is the one
+        // the user would recognize.
+        let key = resolve_shim(&path).to_string_lossy().to_ascii_lowercase();
         if path.is_file() && seen.insert(key) {
             found.push((path, source));
         }
