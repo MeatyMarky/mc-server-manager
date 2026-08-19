@@ -74,3 +74,17 @@ export interface AppErrorShape {
   /// Extra payload for errors that carry one, e.g. installer logs.
   detail?: { logPath?: string; logTail?: string; required?: number } | null;
 }
+
+// Phase 6: backups, schedules and resource metrics.
+export type { ArchiveEntry } from "./bindings/ArchiveEntry";
+export type { Backup } from "./bindings/Backup";
+export type { BackupOptions } from "./bindings/BackupOptions";
+export type { Estimate } from "./bindings/Estimate";
+export type { Format } from "./bindings/Format";
+export type { MetricsEvent } from "./bindings/MetricsEvent";
+export type { Sample } from "./bindings/Sample";
+export type { Schedule } from "./bindings/Schedule";
+export type { ScheduleInput } from "./bindings/ScheduleInput";
+export type { Scope } from "./bindings/Scope";
+export type { SpaceCheck } from "./bindings/SpaceCheck";
+export type { Window as MetricsWindow } from "./bindings/Window";

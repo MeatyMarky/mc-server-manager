@@ -5,6 +5,15 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppErrorShape,
   AppInfo,
+  ArchiveEntry,
+  Backup,
+  BackupOptions,
+  Estimate,
+  MetricsWindow,
+  Sample,
+  Schedule,
+  ScheduleInput,
+  SpaceCheck,
   BuildEntry,
   EulaStatus,
   JavaRuntime,
@@ -177,4 +186,35 @@ export const ipc = {
     invoke<PackPlan>("mrpack_plan", { id, archive }),
   mrpackImport: (id: number, archive: string) =>
     invoke<string>("mrpack_import", { id, archive }),
+
+  // Phase 6: backups, schedules and metrics.
+  backupsList: (id: number) => invoke<Backup[]>("backups_list", { id }),
+  /** Size estimate plus the free-space verdict, shown before anything starts. */
+  backupPlan: (id: number, options: BackupOptions) =>
+    invoke<SpaceCheck>("backup_plan", { id, options }),
+  backupEstimate: (id: number, options: BackupOptions) =>
+    invoke<Estimate>("backup_estimate", { id, options }),
+  /** Returns a task id; progress arrives as task events. */
+  backupCreate: (id: number, options: BackupOptions) =>
+    invoke<string>("backup_create", { id, options }),
+  backupDelete: (backupId: number) => invoke<void>("backup_delete", { backupId }),
+  backupPreview: (backupId: number) =>
+    invoke<ArchiveEntry[]>("backup_preview", { backupId }),
+  /** Returns a task id. The current state is archived before anything is written. */
+  backupRestore: (backupId: number) => invoke<string>("backup_restore", { backupId }),
+  backupsPrune: (id: number, keepCount: number | null, keepDays: number | null) =>
+    invoke<number>("backups_prune", { id, keepCount, keepDays }),
+
+  schedulesList: (id: number) => invoke<Schedule[]>("schedules_list", { id }),
+  scheduleSave: (id: number, input: ScheduleInput) =>
+    invoke<Schedule>("schedule_save", { id, input }),
+  scheduleDelete: (scheduleId: number) =>
+    invoke<void>("schedule_delete", { scheduleId }),
+  scheduleRunNow: (scheduleId: number) =>
+    invoke<void>("schedule_run_now", { scheduleId }),
+
+  metricsRange: (id: number, window: MetricsWindow) =>
+    invoke<Sample[]>("metrics_range", { id, window }),
+  /** The heap the JVM is actually given, for the memory chart's ceiling. */
+  metricsHeapBytes: (id: number) => invoke<number | null>("metrics_heap_bytes", { id }),
 };

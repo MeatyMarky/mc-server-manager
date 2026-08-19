@@ -5,7 +5,7 @@
 //! for "a server we started" and "a server that outlived the app", and the
 //! pid is only ever trusted together with its recorded start time.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -52,6 +52,11 @@ struct Running {
 pub struct Supervisor {
     running: Mutex<HashMap<String, Running>>,
     consoles: Mutex<HashMap<String, Arc<Mutex<ConsoleBuffer>>>>,
+    /// Who is currently connected, per instance, as the log reports it. This is
+    /// what the player-count chart plots and what "skip the backup if nobody
+    /// played" reads; a server this app does not own has no entry, which is
+    /// different from an entry saying nobody is online.
+    online: Mutex<HashMap<String, HashSet<String>>>,
 }
 
 impl Supervisor {
@@ -84,6 +89,54 @@ impl Supervisor {
             .and_then(|map| map.get(uuid).map(|running| running.pid))
     }
 
+    /// How many players the log has seen join and not leave.
+    pub fn online_count(&self, uuid: &str) -> Option<usize> {
+        self.online
+            .lock()
+            .ok()
+            .and_then(|map| map.get(uuid).map(|names| names.len()))
+    }
+
+    pub fn online_players(&self, uuid: &str) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .online
+            .lock()
+            .ok()
+            .and_then(|map| map.get(uuid).map(|names| names.iter().cloned().collect()))
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    pub(crate) fn player_joined(&self, uuid: &str, name: &str) {
+        if let Ok(mut map) = self.online.lock() {
+            map.entry(uuid.to_string()).or_default().insert(name.to_string());
+        }
+    }
+
+    pub(crate) fn player_left(&self, uuid: &str, name: &str) {
+        if let Ok(mut map) = self.online.lock() {
+            if let Some(names) = map.get_mut(uuid) {
+                names.remove(name);
+            }
+        }
+    }
+
+    /// A server that just started has nobody on it, and one that stopped has
+    /// nobody either. Both cases replace the set rather than leaving the last
+    /// session's names to be counted again.
+    pub(crate) fn reset_online(&self, uuid: &str) {
+        if let Ok(mut map) = self.online.lock() {
+            map.insert(uuid.to_string(), HashSet::new());
+        }
+    }
+
+    pub(crate) fn drop_online(&self, uuid: &str) {
+        if let Ok(mut map) = self.online.lock() {
+            map.remove(uuid);
+        }
+    }
+
     fn insert(&self, uuid: &str, running: Running) {
         if let Ok(mut map) = self.running.lock() {
             map.insert(uuid.to_string(), running);
@@ -94,6 +147,7 @@ impl Supervisor {
         if let Ok(mut map) = self.running.lock() {
             map.remove(uuid);
         }
+        self.drop_online(uuid);
     }
 }
 
@@ -353,6 +407,10 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
                 .bind(instance.id)
                 .execute(&state.db)
                 .await;
+            state.supervisor.reset_online(&instance.uuid);
+            // If the app died between save-off and save-on, this is the first
+            // moment a console exists to put it right.
+            crate::backup::saveguard::recover_on_start(&state, instance.id).await;
             tracing::info!(instance = %instance.name, took = ?took, "server is ready");
         }
         LogEvent::Stopping => {
@@ -361,12 +419,15 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
         }
         LogEvent::PlayerUuid { name, uuid } => {
             record_player(&state, instance.id, &uuid, &name).await;
+            state.supervisor.player_joined(&instance.uuid, &name);
             events::player(app, &instance.uuid, "join", &name, Some(&uuid));
         }
         LogEvent::PlayerJoined { name, .. } => {
+            state.supervisor.player_joined(&instance.uuid, &name);
             events::player(app, &instance.uuid, "join", &name, None);
         }
         LogEvent::PlayerLeft { name } => {
+            state.supervisor.player_left(&instance.uuid, &name);
             events::player(app, &instance.uuid, "leave", &name, None);
         }
         LogEvent::PortInUse { detail } => {

@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   ConsoleEvent,
+  MetricsEvent,
   InstanceStatusEvent,
   PlayerEvent,
   QuitRequestedEvent,
@@ -18,6 +19,8 @@ export const EVENTS = {
   player: "instance://player",
   taskProgress: "task://progress",
   taskDone: "task://done",
+  metrics: "instance://metrics",
+  backupsChanged: "backups://changed",
 } as const;
 
 export function onInstancesChanged(handler: () => void): Promise<UnlistenFn> {
@@ -56,4 +59,13 @@ export function onConsoleLines(handler: (payload: ConsoleEvent) => void): Promis
 
 export function onPlayerEvent(handler: (payload: PlayerEvent) => void): Promise<UnlistenFn> {
   return listen<PlayerEvent>(EVENTS.player, (event) => handler(event.payload));
+}
+
+export function onMetrics(handler: (payload: MetricsEvent) => void): Promise<UnlistenFn> {
+  return listen<MetricsEvent>(EVENTS.metrics, (event) => handler(event.payload));
+}
+
+/** Fires with the instance UUID whose backup list changed. */
+export function onBackupsChanged(handler: (uuid: string) => void): Promise<UnlistenFn> {
+  return listen<string>(EVENTS.backupsChanged, (event) => handler(event.payload));
 }

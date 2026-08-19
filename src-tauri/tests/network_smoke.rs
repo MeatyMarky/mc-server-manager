@@ -6,7 +6,7 @@
 //! cargo test --test network_smoke -- --ignored --nocapture
 //! ```
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use mc_server_manager_lib::db;
 use mc_server_manager_lib::db::models::{LaunchKind, ServerType};
@@ -722,4 +722,233 @@ async fn a_mod_installs_into_the_right_folder() {
         .unwrap();
     assert!(!jar.exists());
     assert!(jar.with_file_name(format!("{}.disabled", planned.file_name)).is_file());
+}
+
+
+/// Phase 6, part one: a real Paper world survives an archive and a restore.
+///
+/// The instance is a genuine Paper install with a world Minecraft itself
+/// generated — region files, `level.dat`, the lot — so this checks the archive
+/// against the data the app actually has to protect rather than against files a
+/// test wrote.
+#[tokio::test]
+#[ignore = "downloads Paper and runs a real server"]
+async fn a_real_world_survives_a_backup_and_restore() {
+    use mc_server_manager_lib::backup::archive::{Format, Scope};
+    use mc_server_manager_lib::backup::{self, BackupOptions};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let state = state_in(&root).await;
+    mc_server_manager_lib::java::rescan(&state.db).await.unwrap();
+
+    let inst = instance_in(&state, &root, "backupme", ServerType::Paper, "1.21.4").await;
+    let cancel = CancellationToken::new();
+    install::install(&state, &state.http, &inst, "1.21.4", None, &cancel, |_, _, _, _| {})
+        .await
+        .expect("install paper");
+    mc_server_manager_lib::instance::eula::set(&state, inst.id, true)
+        .await
+        .expect("accept eula");
+
+    // Run the server once, purely to make it generate a world.
+    let world_dir = inst.path_buf().join("world");
+    run_server_until_ready(&state, &inst, 25598, &["save-all flush", "stop"]).await;
+    assert!(world_dir.join("level.dat").is_file(), "the server generated a world");
+
+    let marker = world_dir.join("msm-marker.txt");
+    std::fs::write(&marker, b"phase 6 was here").unwrap();
+    let level_dat = std::fs::read(world_dir.join("level.dat")).unwrap();
+    let regions: Vec<PathBuf> = std::fs::read_dir(world_dir.join("region"))
+        .expect("region folder")
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    assert!(!regions.is_empty(), "the world has region files to protect");
+
+    for format in [Format::TarZst, Format::Zip] {
+        let created = backup::create(
+            &state,
+            inst.id,
+            BackupOptions {
+                format,
+                scope: Scope::Full,
+                ..BackupOptions::default()
+            },
+            "manual",
+            None,
+            &CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap_or_else(|err| panic!("{format:?} backup failed: {err}"));
+        println!("{format:?}: {} ({} bytes)", created.path, created.size_bytes);
+
+        // Wipe the world, then put it back from the archive.
+        std::fs::remove_dir_all(&world_dir).expect("delete the world");
+        backup::restore(&state, created.id, &CancellationToken::new(), |_| {})
+            .await
+            .unwrap_or_else(|err| panic!("{format:?} restore failed: {err}"));
+
+        assert_eq!(
+            std::fs::read_to_string(&marker).expect("the marker came back"),
+            "phase 6 was here",
+            "{format:?}"
+        );
+        assert_eq!(
+            std::fs::read(world_dir.join("level.dat")).expect("level.dat came back"),
+            level_dat,
+            "{format:?}: level.dat is byte-identical"
+        );
+        for region in &regions {
+            assert!(region.is_file(), "{format:?}: {} came back", region.display());
+        }
+
+        // The state that was replaced was archived first.
+        assert!(
+            backup::list(&state, inst.id)
+                .await
+                .unwrap()
+                .iter()
+                .any(|entry| entry.kind == "pre_restore"),
+            "{format:?}: a safety copy was taken before overwriting"
+        );
+    }
+}
+
+/// Phase 6, part two: the flush confirmation this app waits for is the one Paper
+/// actually prints.
+///
+/// The live-backup sequence hangs for two minutes and then reports a failure if
+/// this matching is wrong, so it is checked against a real server's output
+/// rather than against a remembered string.
+#[tokio::test]
+#[ignore = "downloads Paper and runs a real server"]
+async fn a_real_server_confirms_save_off_and_save_on() {
+    use mc_server_manager_lib::backup::saveguard;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let state = state_in(&root).await;
+    mc_server_manager_lib::java::rescan(&state.db).await.unwrap();
+
+    let inst = instance_in(&state, &root, "saveguard", ServerType::Paper, "1.21.4").await;
+    let cancel = CancellationToken::new();
+    install::install(&state, &state.http, &inst, "1.21.4", None, &cancel, |_, _, _, _| {})
+        .await
+        .expect("install paper");
+    mc_server_manager_lib::instance::eula::set(&state, inst.id, true)
+        .await
+        .expect("accept eula");
+
+    // The exact sequence a backup of a running server sends.
+    let transcript =
+        run_server_until_ready(&state, &inst, 25597, &["save-off", "save-all flush", "save-on", "stop"])
+            .await;
+
+    let confirmed: Vec<&String> = transcript
+        .iter()
+        .filter(|line| saveguard::flush_confirmed(line))
+        .collect();
+    assert!(
+        !confirmed.is_empty(),
+        "no line matched the flush confirmation; the live backup would wait for two minutes.\n{}",
+        transcript.join("\n")
+    );
+    println!("flush confirmed by: {confirmed:?}");
+
+    assert!(
+        transcript.iter().any(|line| line.contains("saving is now disabled")
+            || line.contains("Turned off world auto-saving")),
+        "the server acknowledged save-off"
+    );
+    assert!(
+        transcript.iter().any(|line| line.contains("saving is now enabled")
+            || line.contains("Turned on world auto-saving")),
+        "the server acknowledged save-on"
+    );
+}
+
+/// Starts the instance's server for real, waits for it to report ready, sends
+/// `commands` on stdin and returns every parsed console message.
+///
+/// The supervisor itself needs an `AppHandle`, which a test cannot build, so
+/// this drives the same launch plan the supervisor would.
+async fn run_server_until_ready(
+    state: &AppState,
+    inst: &mc_server_manager_lib::db::models::Instance,
+    port: u16,
+    commands: &[&str],
+) -> Vec<String> {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    use mc_server_manager_lib::logparse::{self, LogEvent};
+    use mc_server_manager_lib::process::console::ConsoleBuffer;
+    use mc_server_manager_lib::process::launch;
+
+    std::fs::write(
+        inst.path_buf().join("server.properties"),
+        format!("server-port={port}\nmax-players=1\nonline-mode=false\nview-distance=4\n").as_bytes(),
+    )
+    .unwrap();
+
+    let reloaded = instance::get(&state.db, inst.id).await.unwrap();
+    let java = mc_server_manager_lib::java::best_for(&state.db, 21)
+        .await
+        .unwrap()
+        .expect("a Java 21+ runtime");
+    let plan = launch::plan(&reloaded, Path::new(&java.path)).expect("launch plan");
+
+    let mut child = tokio::process::Command::new(&plan.program)
+        .args(&plan.args)
+        .current_dir(&plan.working_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the server");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut lines = BufReader::new(stdout).lines();
+    let mut buffer = ConsoleBuffer::new();
+    let mut transcript = Vec::new();
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
+    let mut ready = false;
+    while tokio::time::Instant::now() < deadline {
+        let Ok(Some(raw)) =
+            tokio::time::timeout(std::time::Duration::from_secs(60), lines.next_line())
+                .await
+                .unwrap_or(Ok(None))
+        else {
+            break;
+        };
+        let parsed = buffer.push(&raw, false);
+        transcript.push(parsed.message.clone());
+        if let Some(LogEvent::Ready { took }) = logparse::detect_event(&parsed.message) {
+            println!("ready in {took:?}");
+            ready = true;
+            break;
+        }
+    }
+    assert!(ready, "the server never reported being ready:\n{}", transcript.join("\n"));
+
+    for command in commands {
+        stdin.write_all(format!("{command}\n").as_bytes()).await.unwrap();
+        stdin.flush().await.unwrap();
+        // Give the server a moment to answer before the next one, so the
+        // transcript shows each acknowledgement in order.
+        tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    }
+
+    while let Ok(Ok(Some(raw))) =
+        tokio::time::timeout(std::time::Duration::from_secs(60), lines.next_line()).await
+    {
+        transcript.push(buffer.push(&raw, false).message);
+    }
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), child.wait()).await;
+    transcript
 }

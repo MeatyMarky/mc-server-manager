@@ -53,7 +53,10 @@ pub async fn prune(pool: &SqlitePool, now: DateTime<Utc>) -> AppResult<PruneStat
     .rows_affected();
 
     if downsampled > 0 || expired > 0 {
-        tracing::debug!(downsampled, expired, "pruned resource samples");
+        // At info level: retention silently deleting rows is exactly the kind of
+        // thing that should be visible in the log when someone asks where their
+        // history went.
+        tracing::info!(downsampled, expired, "pruned resource samples");
     }
     Ok(PruneStats {
         downsampled,

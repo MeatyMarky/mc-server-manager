@@ -164,11 +164,37 @@ naming `../../etc/passwd` must never write outside the instance folder.
 
 ### Backups of a running server
 `save-off` → `save-all flush` → wait for the save confirmation → archive → `save-on`, and
-`save-on` is restored even when the archive step fails or is cancelled.
+`save-on` is restored even when the archive step fails or is cancelled. Saving being off is
+recorded in the DB (`instances.saving_disabled_at`) **before** `save-off` is sent, so an app
+that dies mid-backup can put it right: at launch a marked instance whose process did not
+survive has the marker cleared (a stopped JVM has no `save-off` state to undo), while one that
+outlived the app keeps it until a console exists again, and `save-on` is sent the moment the
+server reports ready. A server that is live but whose console this app does not own cannot be
+quiesced, so a backup of it is refused rather than written torn.
+
+Archives land under `<data>/backups/<instance-uuid>/`, are written as `.part` and renamed, and
+take a suffixed name if one already exists — a restore takes its safety backup in the same
+second as the archive it is reading, and second-resolution names would otherwise collide.
+
+### Retention keeps a backup if *either* rule wants it
+"Keep 5" and "keep 7 days" together mean an archive survives while either limit still claims it,
+never the intersection. Manual and `pre_restore` backups are never pruned automatically — the
+safety copy taken before a restore is the one a user reaches for when the restore was the mistake.
+
+### A missed schedule runs once, not once per occurrence
+Due-ness is derived from `last_run_at`, so an app closed for a week comes back to a single
+overdue backup per schedule. Anything that skips a due run (nobody played, folder missing) still
+marks it as run, or the loop asks again every tick for as long as the condition holds.
 
 ### `resource_samples` retention
 Full resolution for 24 h, downsampled to one row per minute after that, deleted past 30 days.
 The prune runs at app start and every 24 h.
+
+### One metrics collector, never one task per server
+A single loop refreshes the process table once per tick and writes a row per running instance,
+so the sampling cost is the same for one server and for twenty. Charts read the tier their
+window has: full resolution inside an hour, minute buckets for a day, ten-minute and hourly
+buckets beyond that — asking for finer detail than retention kept would only invent it.
 
 ## Database
 

@@ -25,6 +25,10 @@ pub const INSTANCE_PLAYER: &str = "instance://player";
 pub const TASK_PROGRESS: &str = "task://progress";
 /// A long-running task finished, succeeded, failed or was cancelled.
 pub const TASK_DONE: &str = "task://done";
+/// One resource sample for one instance.
+pub const INSTANCE_METRICS: &str = "instance://metrics";
+/// A backup finished, or a schedule ran, so the backup list is stale.
+pub const BACKUPS_CHANGED: &str = "backups://changed";
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +105,21 @@ pub struct TaskDoneEvent {
     pub instance_id: Option<i64>,
 }
 
+/// One resource sample, pushed as it is taken so a chart can follow live
+/// without asking for the last row on a timer.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct MetricsEvent {
+    pub uuid: String,
+    pub ts: String,
+    pub cpu_pct: f64,
+    #[ts(type = "number")]
+    pub rss_bytes: i64,
+    #[ts(type = "number | null")]
+    pub players: Option<i64>,
+}
+
 /// Emit failures are logged, never propagated: a missing listener must not turn
 /// a successful backend operation into an error.
 fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
@@ -158,6 +177,14 @@ pub fn task_progress(app: &AppHandle, payload: TaskProgressEvent) {
 
 pub fn task_done(app: &AppHandle, payload: TaskDoneEvent) {
     emit(app, TASK_DONE, payload);
+}
+
+pub fn metrics(app: &AppHandle, _uuid: &str, payload: MetricsEvent) {
+    emit(app, INSTANCE_METRICS, payload);
+}
+
+pub fn backups_changed(app: &AppHandle, uuid: &str) {
+    emit(app, BACKUPS_CHANGED, uuid.to_string());
 }
 
 pub fn quit_requested(app: &AppHandle, live_instances: Vec<String>) {

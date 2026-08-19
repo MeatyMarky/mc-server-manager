@@ -315,15 +315,31 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
   apply `overrides/` and `server-overrides/`, create or update the instance.
 - Tests: jar metadata parsing fixtures, mrpack index parsing, facet/query building.
 
-### Phase 6 — Backups, scheduling, resource graphs
+### Phase 6 — Backups, scheduling, resource graphs  ✅
 - Archive engine: zip and tar.zst, streaming with progress + cancel, scope full|worlds,
-  exclusions (`.msm`, logs, caches).
+  exclusions (`.msm/staging`, logs, crash reports, caches). Written to `<name>.part` and renamed,
+  with a collision-proof name so two archives in the same second cannot overwrite each other.
 - If the server is running: `save-off` → `save-all flush` → wait for the save confirmation →
-  archive → `save-on`, with `save-on` restored even on error or cancel.
-- Retention by count and/or age; scheduler task (cron) that survives restarts via `next_run_at`.
-- Restore: confirmation step + automatic `pre_restore` backup, then replace.
-- Metrics: `sysinfo` sampler per running instance (5 s), retention trim, CPU/RAM charts.
-- Tests: retention selection, cron next-run computation, archive round-trip in a temp dir.
+  archive → `save-on`, with `save-on` restored even on error or cancel. The disabled state is
+  recorded in the DB *before* `save-off` is sent, so an app killed mid-backup can put it right:
+  a server that died with the app has the marker cleared at launch (saving is on again by
+  definition), one that outlived it keeps the marker until a console exists to say `save-on` on.
+  A live server this app does not own is refused rather than archived torn.
+- Size estimate and a free-space check (estimate × 1.2) before anything is written, naming the
+  shortfall.
+- Retention by count and/or age — an archive survives if *either* rule wants it — enforced after
+  every scheduled run. Manual and `pre_restore` backups are never pruned automatically.
+- Scheduler: one loop, interval or daily. Due-ness comes from `last_run_at`, so a week offline
+  produces one overdue run per schedule rather than a queue of every missed occurrence.
+  Optional restart-after-backup and skip-if-nobody-played.
+- Restore: preview of the archive contents, refused while running, automatic `pre_restore`
+  backup, then replace; the UI confirms by typed instance name.
+- Metrics: **one** `sysinfo` collector for every instance (default 5 s, configurable), player
+  count from the console, retention trim wired up at launch and every 24 h, CPU / memory-vs-heap /
+  players charts over 1h/24h/7d/30d reading the resolution tier that window has.
+- Tests: retention selection, next-run computation, archive round-trip in a temp dir, the
+  save-on-always path, plus live checks against a real Paper server (a generated world restored
+  byte-identically in both formats, and the flush confirmation matched against real output).
 
 ### Phase 7 — Polish + packaging
 - Error/empty/loading states everywhere, toast surface for `AppError`, keyboard-navigation pass,

@@ -2,6 +2,7 @@
 //! function and let `AppError` serialize itself. No business logic lives here.
 
 pub mod app;
+pub mod backups;
 pub mod config;
 pub mod instances;
 pub mod players;

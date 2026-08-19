@@ -23,6 +23,7 @@ import { ConfigTab } from "@/features/config/ConfigTab";
 import { ConsoleTab } from "@/features/console/ConsoleTab";
 import { ModsTab } from "@/features/mods/ModsTab";
 import { PlayersTab } from "@/features/players/PlayersTab";
+import { BackupsTab } from "@/features/backups/BackupsTab";
 import { WorldsTab } from "@/features/worlds/WorldsTab";
 import { RunControls } from "@/features/console/RunControls";
 import { CloneDialog, DeleteDialog, LocateBanner, RenameDialog } from "./dialogs";
@@ -171,12 +172,16 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
             <WorldsTab instance={instance} />
           )}
         </TabsContent>
-        <TabsContent value="backups">
-          <PlaceholderTab
-            title="Backups"
-            phase={6}
-            description="Manual and scheduled backups with retention, save-off during the copy, and a confirmed restore."
-          />
+        <TabsContent value="backups" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title="Backups"
+              phase={6}
+              description="Locate the instance folder to back it up or restore it."
+            />
+          ) : (
+            <BackupsTab instance={instance} />
+          )}
         </TabsContent>
         <TabsContent value="settings">
           <SettingsTab instance={instance} />

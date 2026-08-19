@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod commands;
 pub mod config;
 pub mod db;
@@ -55,7 +56,19 @@ pub fn run() {
                 Err(err) => tracing::error!(error = %err, "orphan reconciliation failed"),
             }
 
+            // An app killed mid-backup can leave a server with saving off. This
+            // decides, per instance, whether that state died with the process or
+            // is still live and needs a console to fix.
+            match tauri::async_runtime::block_on(backup::saveguard::reconcile_on_launch(&state)) {
+                Ok(0) => {}
+                Ok(n) => tracing::warn!(count = n, "instances still have world saving disabled"),
+                Err(err) => tracing::error!(error = %err, "could not reconcile saving markers"),
+            }
+
             tauri::async_runtime::spawn(metrics::retention::pruner_loop(pool.clone()));
+            // One sampler and one scheduler for the whole app, whatever the
+            // instance count. Both are started after `manage` below so they can
+            // read the state; see the spawns further down.
             // First run has no Java cached yet; detect in the background so the
             // Settings tab and install flow have something to offer immediately.
             tauri::async_runtime::spawn(async move {
@@ -70,6 +83,12 @@ pub fn run() {
             });
             app.manage(state);
             setup_tray(app.handle())?;
+
+            // Resource sampling and scheduled backups: exactly one task each.
+            // The scheduler's first tick is what catches up anything that was
+            // due while the app was closed.
+            tauri::async_runtime::spawn(metrics::collector::run(app.handle().clone()));
+            tauri::async_runtime::spawn(backup::runner::run(app.handle().clone()));
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -145,6 +164,20 @@ pub fn run() {
             commands::mods::mods_loader,
             commands::mods::mrpack_plan,
             commands::mods::mrpack_import,
+            commands::backups::backups_list,
+            commands::backups::backup_plan,
+            commands::backups::backup_estimate,
+            commands::backups::backup_create,
+            commands::backups::backup_delete,
+            commands::backups::backup_preview,
+            commands::backups::backup_restore,
+            commands::backups::backups_prune,
+            commands::backups::schedules_list,
+            commands::backups::schedule_save,
+            commands::backups::schedule_delete,
+            commands::backups::schedule_run_now,
+            commands::backups::metrics_range,
+            commands::backups::metrics_heap_bytes,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

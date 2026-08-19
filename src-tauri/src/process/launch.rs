@@ -31,6 +31,37 @@ pub fn heap_args(min_ram_mb: i64, max_ram_mb: i64) -> Vec<String> {
     vec![format!("-Xms{min}M"), format!("-Xmx{max}M")]
 }
 
+/// The heap the JVM will actually be given, in bytes.
+///
+/// The instance's RAM setting is the default, but a custom `-Xmx` in the JVM
+/// arguments is appended after it and so wins — the memory chart has to plot
+/// against the limit the server really runs with, not the one the form shows.
+pub fn max_heap_bytes(max_ram_mb: i64, jvm_args: &[String]) -> Option<u64> {
+    let from_args = jvm_args
+        .iter()
+        .filter_map(|arg| parse_xmx(arg))
+        .next_back();
+
+    from_args.or_else(|| u64::try_from(max_ram_mb).ok().map(|mb| mb * 1024 * 1024))
+}
+
+/// `-Xmx4G`, `-Xmx4096m`, `-Xmx4096` (bytes), `-Xmx8g`.
+fn parse_xmx(arg: &str) -> Option<u64> {
+    let value = arg.strip_prefix("-Xmx").or_else(|| arg.strip_prefix("-XX:MaxHeapSize="))?;
+    let (digits, unit) = value.split_at(value.find(|c: char| !c.is_ascii_digit()).unwrap_or(value.len()));
+    let amount: u64 = digits.parse().ok()?;
+
+    let scale = match unit.trim().to_ascii_lowercase().as_str() {
+        "" => 1,
+        "k" | "kb" => 1024,
+        "m" | "mb" => 1024 * 1024,
+        "g" | "gb" => 1024 * 1024 * 1024,
+        "t" | "tb" => 1024_u64.pow(4),
+        _ => return None,
+    };
+    amount.checked_mul(scale)
+}
+
 fn decode_list(raw: &str) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
 }
@@ -272,5 +303,32 @@ mod tests {
 
         let plan = plan(&inst, Path::new("java")).unwrap();
         assert_eq!(plan.args, vec!["-Xms1024M", "-Xmx4096M", "-jar", "server.jar"]);
+    }
+
+    #[test]
+    fn the_heap_limit_comes_from_the_ram_setting_unless_an_arg_overrides_it() {
+        assert_eq!(max_heap_bytes(4096, &[]), Some(4096 * 1024 * 1024));
+
+        // A custom -Xmx is appended after the generated one, so the JVM uses it
+        // and so does the chart.
+        let custom = vec!["-XX:+UseG1GC".to_string(), "-Xmx8G".to_string()];
+        assert_eq!(max_heap_bytes(4096, &custom), Some(8 * 1024 * 1024 * 1024));
+
+        // The last one wins, the same way the JVM reads them.
+        let twice = vec!["-Xmx2G".to_string(), "-Xmx6G".to_string()];
+        assert_eq!(max_heap_bytes(4096, &twice), Some(6 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn heap_sizes_parse_in_every_shape_the_jvm_accepts() {
+        assert_eq!(parse_xmx("-Xmx1024"), Some(1024));
+        assert_eq!(parse_xmx("-Xmx512k"), Some(512 * 1024));
+        assert_eq!(parse_xmx("-Xmx2048M"), Some(2048 * 1024 * 1024));
+        assert_eq!(parse_xmx("-Xmx3g"), Some(3 * 1024 * 1024 * 1024));
+        assert_eq!(parse_xmx("-XX:MaxHeapSize=1G"), Some(1024 * 1024 * 1024));
+
+        assert_eq!(parse_xmx("-Xms1G"), None, "the minimum is not the maximum");
+        assert_eq!(parse_xmx("-XX:+UseG1GC"), None);
+        assert_eq!(parse_xmx("-Xmxlots"), None);
     }
 }
