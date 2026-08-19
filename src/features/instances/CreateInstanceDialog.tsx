@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
 import { errorMessage, ipc } from "@/lib/ipc";
+import { JavaPlanNotice } from "@/features/setup/ManagedRuntimes";
 import { SERVER_TYPES, SERVER_TYPE_LABEL } from "@/lib/status";
 import type { ServerType } from "@/lib/types";
 import { useAppInfo, useCreateInstance } from "./queries";
@@ -171,6 +172,10 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
               />
             </div>
           </div>
+
+          {/* Which Java this version needs, and the download that provides it —
+              asked here rather than at the first failed start. */}
+          <JavaPlanNotice mcVersion={mcVersion} />
 
           <div className="grid gap-2">
             <Label htmlFor="instance-ram">Maximum RAM (MB)</Label>

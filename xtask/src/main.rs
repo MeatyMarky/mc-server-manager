@@ -107,6 +107,7 @@ fn refresh_fixtures() -> Result<()> {
     fabric(&client)?;
     forge(&client)?;
     neoforge(&client)?;
+    adoptium(&client)?;
 
     println!("\nDone. Review the diff, then run:");
     println!("  cargo test");
@@ -263,6 +264,27 @@ fn fabric(client: &reqwest::blocking::Client) -> Result<()> {
             .cloned()
             .collect();
         write_json(file, &json!(head))?;
+    }
+    Ok(())
+}
+
+/// The Adoptium responses the managed-runtime resolver is tested against.
+///
+/// Recorded per platform because the archive extension and the release line
+/// differ: a Windows JDK is a .zip, a Linux one a .tar.gz.
+fn adoptium(client: &reqwest::blocking::Client) -> Result<()> {
+    println!("Adoptium…");
+    for (feature, os, arch) in [
+        (25, "windows", "x64"),
+        (21, "linux", "x64"),
+        (17, "windows", "x64"),
+        (8, "linux", "aarch64"),
+    ] {
+        let url = format!(
+            "https://api.adoptium.net/v3/assets/latest/{feature}/hotspot             ?os={os}&architecture={arch}&image_type=jdk&vendor=eclipse"
+        );
+        let body = get_json(client, &url)?;
+        write_json(&format!("adoptium_latest_{feature}_{os}_{arch}.json"), &body)?;
     }
     Ok(())
 }

@@ -111,3 +111,10 @@ export type { BuildInfo } from "./bindings/BuildInfo";
 export type { Readiness } from "./bindings/Readiness";
 export type { ReportPart } from "./bindings/ReportPart";
 export type { ReportPreview } from "./bindings/ReportPreview";
+
+// Managed JDKs: runtimes this app downloads so a server never depends on what
+// happens to be installed.
+export type { DownloadOffer } from "./bindings/DownloadOffer";
+export type { JavaPlan } from "./bindings/JavaPlan";
+export type { ManagedRuntime } from "./bindings/ManagedRuntime";
+export type { Origin as JavaOrigin } from "./bindings/Origin";

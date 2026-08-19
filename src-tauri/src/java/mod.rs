@@ -6,7 +6,9 @@
 //! cached in `java_runtimes` keyed on the binary's mtime and size, so a rescan
 //! only executes binaries that actually changed.
 
+pub mod adoptium;
 pub mod detect;
+pub mod managed;
 pub mod version;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +17,7 @@ use ts_rs::TS;
 
 use crate::db::now_rfc3339;
 use crate::error::{AppError, AppResult};
+use crate::state::AppState;
 
 pub use version::{required_java_for, satisfies, JavaVersionInfo};
 
@@ -130,6 +133,65 @@ pub async fn bits_of(pool: &SqlitePool, path: &std::path::Path) -> Option<i64> {
         .await
         .ok()
         .and_then(|probe| probe.bits)
+}
+
+/// Where a launch's Java came from, for the log line and the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum Origin {
+    /// The user chose this exact binary for this instance.
+    Pinned,
+    /// A JDK this app downloaded, shared by every instance needing that version.
+    Managed,
+    /// A JDK that was already on the machine.
+    System,
+}
+
+/// The runtime a launch will use, and where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Selection {
+    pub path: std::path::PathBuf,
+    pub origin: Origin,
+    #[allow(dead_code)]
+    pub major: Option<i64>,
+}
+
+/// Picks the runtime for an instance, in the order that respects the user's
+/// choices before this app's own:
+///
+/// 1. the pin, when it is set and points at something;
+/// 2. a managed runtime for the required version — this app downloaded it for
+///    exactly this, and it cannot have been changed underneath;
+/// 3. a system JDK that satisfies the requirement.
+///
+/// `None` means nothing suitable exists, which is the cue to offer a download.
+pub async fn select_for(
+    state: &AppState,
+    pinned: Option<&str>,
+    required: i64,
+) -> AppResult<Option<Selection>> {
+    if let Some(pinned) = pinned.filter(|path| std::path::Path::new(path).is_file()) {
+        return Ok(Some(Selection {
+            path: std::path::PathBuf::from(pinned),
+            origin: Origin::Pinned,
+            major: None,
+        }));
+    }
+
+    if let Some(runtime) = managed::for_version(state, required).await? {
+        return Ok(Some(Selection {
+            path: std::path::PathBuf::from(runtime.java_path),
+            origin: Origin::Managed,
+            major: Some(runtime.feature_version),
+        }));
+    }
+
+    Ok(best_for(&state.db, required).await?.map(|runtime| Selection {
+        path: std::path::PathBuf::from(runtime.path),
+        origin: Origin::System,
+        major: Some(runtime.major),
+    }))
 }
 
 /// What this instance really needs, taking the recorded number and the version
@@ -515,5 +577,116 @@ mod tests {
             probe_major(std::path::Path::new("/nowhere/bin/java")).await,
             None
         );
+    }
+
+    /// A file that exists, standing in for a java binary.
+    fn touch(path: &std::path::Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"java").unwrap();
+    }
+
+    async fn managed_state(dir: &std::path::Path) -> AppState {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        AppState::new(pool, dir.to_path_buf())
+    }
+
+    async fn register_managed(state: &AppState, feature: i64, path: &std::path::Path) {
+        touch(path);
+        sqlx::query(
+            "INSERT INTO managed_runtimes
+                (feature_version, release_name, vendor, java_path, installed_at, size_bytes)
+             VALUES (?, ?, 'Eclipse Temurin', ?, ?, 1)",
+        )
+        .bind(feature)
+        .bind(format!("jdk-{feature}.0.1+9"))
+        .bind(path.to_string_lossy().to_string())
+        .bind(now_rfc3339())
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn selection_prefers_a_pin_then_a_managed_runtime_then_the_system() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = managed_state(dir.path()).await;
+
+        // Only a system JDK to start with.
+        seed(&state.db, "/system/jdk-25/bin/java", 25).await;
+        let system = select_for(&state, None, 25).await.unwrap().unwrap();
+        assert_eq!(system.origin, Origin::System);
+        assert_eq!(system.path, std::path::PathBuf::from("/system/jdk-25/bin/java"));
+
+        // A managed runtime for the same version takes over: this app put it
+        // there for exactly this, and nothing else can have changed it.
+        let managed_path = managed::install_dir(dir.path(), 25).join("bin").join("java");
+        register_managed(&state, 25, &managed_path).await;
+        let chosen = select_for(&state, None, 25).await.unwrap().unwrap();
+        assert_eq!(chosen.origin, Origin::Managed);
+        assert_eq!(chosen.path, managed_path);
+
+        // An explicit pin beats both, because the user asked for it.
+        let pinned = dir.path().join("pinned").join("bin").join("java");
+        touch(&pinned);
+        let chosen = select_for(&state, Some(&pinned.to_string_lossy()), 25)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(chosen.origin, Origin::Pinned);
+        assert_eq!(chosen.path, pinned);
+    }
+
+    #[tokio::test]
+    async fn a_pin_that_no_longer_exists_does_not_silently_become_something_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = managed_state(dir.path()).await;
+        seed(&state.db, "/system/jdk-25/bin/java", 25).await;
+
+        // preflight turns this into JavaPinnedMissing; selection simply does not
+        // pretend the pin was honoured.
+        let chosen = select_for(&state, Some("Z:/gone/bin/java"), 25)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(chosen.origin, Origin::Pinned);
+    }
+
+    #[tokio::test]
+    async fn nothing_suitable_is_none_which_is_what_offers_a_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = managed_state(dir.path()).await;
+
+        // A machine with only Java 17 cannot run a server needing 25.
+        seed(&state.db, "/system/jdk-17/bin/java", 17).await;
+        assert!(select_for(&state, None, 25).await.unwrap().is_none());
+
+        // A managed 21 does not satisfy 25 either.
+        let managed_path = managed::install_dir(dir.path(), 21).join("bin").join("java");
+        register_managed(&state, 21, &managed_path).await;
+        assert!(select_for(&state, None, 25).await.unwrap().is_none());
+
+        // But it does satisfy 17.
+        let chosen = select_for(&state, None, 17).await.unwrap().unwrap();
+        assert_eq!(chosen.origin, Origin::Managed);
+    }
+
+    #[tokio::test]
+    async fn a_managed_runtime_whose_files_are_gone_falls_back_to_the_system() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = managed_state(dir.path()).await;
+        seed(&state.db, "/system/jdk-25/bin/java", 25).await;
+
+        sqlx::query(
+            "INSERT INTO managed_runtimes
+                (feature_version, release_name, vendor, java_path, installed_at, size_bytes)
+             VALUES (25, 'jdk-25.0.1+9', 'Eclipse Temurin', 'Z:/deleted/bin/java', ?, 1)",
+        )
+        .bind(now_rfc3339())
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let chosen = select_for(&state, None, 25).await.unwrap().unwrap();
+        assert_eq!(chosen.origin, Origin::System, "a deleted folder is not a runtime");
     }
 }

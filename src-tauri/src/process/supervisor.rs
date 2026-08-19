@@ -214,42 +214,38 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
     // row must not be able to lower the requirement.
     let required = java::required_for(instance.java_major, &instance.mc_version);
 
+    // A pin that points at nothing is an error rather than a silent fallback:
+    // the user chose it, so its disappearance is worth saying out loud.
     if let Some(pinned) = &instance.java_path {
-        let path = PathBuf::from(pinned);
-        if path.is_file() {
-            report_choice(
-                state,
-                instance,
-                &path,
-                launch::effective_heap_mb(instance),
-                "pinned for this server",
-            )
-            .await;
-            // A pin is a preference, not a licence to run a server on a JVM it
-            // cannot load. Checked like any other choice.
-            check_java_version(instance, &path, required).await?;
-            check_heap_fits(state, instance, &path).await?;
-            return Ok(path);
+        if !Path::new(pinned).is_file() {
+            return Err(AppError::JavaPinnedMissing {
+                instance: instance.name.clone(),
+                path: pinned.clone(),
+            });
         }
-        return Err(AppError::JavaPinnedMissing {
-            instance: instance.name.clone(),
-            path: pinned.clone(),
-        });
     }
 
-    if let Some(runtime) = java::best_for(&state.db, required).await? {
-        let path = PathBuf::from(runtime.path);
+    if let Some(selection) =
+        java::select_for(state, instance.java_path.as_deref(), required).await?
+    {
+        let how = match selection.origin {
+            java::Origin::Pinned => "pinned for this server",
+            java::Origin::Managed => "downloaded by this app",
+            java::Origin::System => "chosen automatically",
+        };
         report_choice(
             state,
             instance,
-            &path,
+            &selection.path,
             launch::effective_heap_mb(instance),
-            "chosen automatically",
+            how,
         )
         .await;
-        check_java_version(instance, &path, required).await?;
-        check_heap_fits(state, instance, &path).await?;
-        return Ok(path);
+        // Whatever it came from, it is asked what it is and refused if it
+        // cannot run this server — a managed runtime included.
+        check_java_version(instance, &selection.path, required).await?;
+        check_heap_fits(state, instance, &selection.path).await?;
+        return Ok(selection.path);
     }
 
     // "No Java at all" and "Java, but too old" have different fixes, and the

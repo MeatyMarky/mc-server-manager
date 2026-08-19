@@ -6,6 +6,8 @@ import type {
   AppErrorShape,
   AppInfo,
   BuildInfo,
+  JavaPlan,
+  ManagedRuntime,
   Readiness,
   ReportPreview,
   ArchiveEntry,
@@ -254,4 +256,20 @@ export const ipc = {
   /** Writes the report to `target` and resolves with the path written. */
   reportWrite: (target: string, id: number | null, lines?: number) =>
     invoke<string>("report_write", { target, id, lines }),
+
+  // Managed JDKs.
+  managedRuntimes: () => invoke<ManagedRuntime[]>("managed_runtimes_list"),
+  managedRuntimesSize: () => invoke<number>("managed_runtimes_size"),
+  managedRuntimeDelete: (featureVersion: number) =>
+    invoke<void>("managed_runtime_delete", { featureVersion }),
+  /** Returns a task id; progress arrives as task events. */
+  managedRuntimeInstall: (featureVersion: number) =>
+    invoke<string>("managed_runtime_install", { featureVersion }),
+  /**
+   * What would run this Minecraft version, and what to download if nothing
+   * can. Asked when creating or importing, so the download is offered there
+   * rather than at the first failed start.
+   */
+  javaPlanFor: (mcVersion: string, recordedMajor?: number | null, pinned?: string | null) =>
+    invoke<JavaPlan>("java_plan_for", { mcVersion, recordedMajor, pinned }),
 };

@@ -102,6 +102,22 @@ runtime's version. `db::integrity_problems` runs `PRAGMA quick_check` at startup
 are logged at error level, go into the problem report, and the one disposable table
 (`java_runtimes`) is rebuilt from scratch.
 
+### The app can provide the Java itself
+Managed runtimes are Temurin JDKs this app downloads from the Adoptium API, one per feature
+version under `<data>/runtimes/temurin-<major>/` and **shared by every instance that needs
+it** — never a copy per instance. Only the `package` of a release is used, never the
+`installer`: an `.msi` would install into the system, and a managed runtime has to vanish
+with the app. The archive goes through the Phase 2 download engine (resumable, cancellable,
+SHA-256 verified, cached), is unpacked into a sibling staging folder, and only then renamed
+into place, so a folder under `runtimes/` never holds a half-extracted JDK.
+
+Selection order is the user's choices before the app's own: pin, then a managed runtime,
+then a system JDK (`java::select_for`). Nothing suitable is `None`, which is what the UI
+turns into an offer naming the version and the download size — asked while an instance is
+being created or imported, not at the first failed start. `use_system_java_only` switches
+downloading off entirely. A managed runtime is removed only when no instance depends on it,
+and the refusal names them.
+
 ### The required Java version is a floor, and the chosen binary is asked directly
 `java::required_for(recorded, mc_version)` takes the higher of the number recorded at
 install time and the version table's answer. Mojang's metadata may raise the requirement —

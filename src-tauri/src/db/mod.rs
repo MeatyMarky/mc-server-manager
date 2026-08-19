@@ -73,6 +73,17 @@ pub async fn integrity_problems(pool: &SqlitePool) -> AppResult<Vec<String>> {
     Ok(rows
         .into_iter()
         .filter(|row| !row.eq_ignore_ascii_case("ok"))
+        .flat_map(|row| {
+            row.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        // Pages left on the free list are not damage: an interrupted VACUUM
+        // leaves them and SQLite reuses them. Reporting them as corruption
+        // would rebuild the Java cache on every launch for nothing.
+        .filter(|line| !line.starts_with("Page ") && !line.starts_with("*** in database"))
         .collect())
 }
 
@@ -172,5 +183,30 @@ mod tests {
         // And it stays quiet with data in it.
         setting_set(&pool, "theme", "dark").await.unwrap();
         assert!(integrity_problems(&pool).await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn free_pages_are_not_reported_as_damage() {
+        // What an interrupted VACUUM leaves behind, next to what real damage
+        // looks like. Only the second kind is a problem.
+        let noise = "*** in database main ***
+Page 26: never used
+Page 27: never used";
+        let damage = "*** in database main ***
+Page 26: never used
+                      row 3 missing from index sqlite_autoindex_java_runtimes_1";
+
+        let filter = |raw: &str| -> Vec<String> {
+            raw.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .filter(|line| !line.starts_with("Page ") && !line.starts_with("*** in database"))
+                .map(str::to_string)
+                .collect()
+        };
+
+        assert!(filter(noise).is_empty());
+        assert_eq!(filter(damage).len(), 1);
+        assert!(filter(damage)[0].contains("missing from index"));
     }
 }

@@ -1036,3 +1036,90 @@ async fn the_real_instance_on_this_machine_produces_a_command_that_runs() {
         "the chosen JVM refuses this command line"
     );
 }
+
+/// Downloads a real JDK from Adoptium, unpacks it, and runs it.
+///
+/// The whole managed-runtime path end to end: resolve, verify the checksum,
+/// extract into place, then ask the binary what it is. Java 17 is used because
+/// it is the smallest current line.
+#[tokio::test]
+#[ignore = "downloads ~180 MB from Adoptium"]
+async fn a_managed_jdk_downloads_unpacks_and_reports_its_version() {
+    use mc_server_manager_lib::java::adoptium;
+    use mc_server_manager_lib::java::managed;
+
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_in(dir.path()).await;
+
+    let candidate = adoptium::resolve(
+        &state.http,
+        17,
+        adoptium::current_os(),
+        adoptium::current_arch(),
+    )
+    .await
+    .expect("resolve a JDK 17");
+    println!(
+        "{} {} ({} MB) {}",
+        candidate.release_name,
+        candidate.openjdk_version,
+        candidate.size_bytes / 1_048_576,
+        candidate.url
+    );
+    assert_eq!(candidate.feature_version, 17);
+    assert_eq!(candidate.sha256.len(), 64);
+
+    let cancel = CancellationToken::new();
+    let runtime = managed::install(&state, &candidate, &cancel, |progress| {
+        if progress.downloaded % (32 * 1_048_576) < 65_536 {
+            println!("  {} MB", progress.downloaded / 1_048_576);
+        }
+    })
+    .await
+    .expect("install the JDK");
+
+    // It landed where every instance can share it, not inside one instance.
+    let expected_dir = managed::install_dir(dir.path(), 17);
+    assert!(
+        Path::new(&runtime.java_path).starts_with(&expected_dir),
+        "{} is not under {}",
+        runtime.java_path,
+        expected_dir.display()
+    );
+    assert!(Path::new(&runtime.java_path).is_file());
+    assert!(runtime.size_bytes > 50_000_000, "{}", runtime.size_bytes);
+
+    // No staging folder survived the install.
+    let leftovers: Vec<PathBuf> = std::fs::read_dir(managed::runtimes_dir(dir.path()))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.file_name().is_some_and(|name| {
+            name.to_string_lossy().starts_with(".staging")
+        }))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+
+    // And the binary really is Java 17.
+    let major = mc_server_manager_lib::java::probe_major(Path::new(&runtime.java_path))
+        .await
+        .expect("the downloaded binary answers -version");
+    assert_eq!(major, 17);
+
+    // It is registered, listed, and selected ahead of any system JDK.
+    let listed = managed::list(&state).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].feature_version, 17);
+    assert!(managed::total_size(&state).await.unwrap() > 50_000_000);
+
+    let chosen = mc_server_manager_lib::java::select_for(&state, None, 17)
+        .await
+        .unwrap()
+        .expect("something satisfies 17");
+    assert_eq!(chosen.origin, mc_server_manager_lib::java::Origin::Managed);
+
+    // Unused, so it can be removed again — files and row together.
+    managed::remove(&state, 17).await.expect("remove it again");
+    assert!(!expected_dir.exists());
+    assert!(managed::list(&state).await.unwrap().is_empty());
+}

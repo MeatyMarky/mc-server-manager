@@ -202,6 +202,11 @@ pub fn run() {
             commands::diag::report_preview,
             commands::diag::report_write,
             commands::diag::startup_readiness,
+            commands::runtimes::managed_runtimes_list,
+            commands::runtimes::managed_runtimes_size,
+            commands::runtimes::managed_runtime_delete,
+            commands::runtimes::managed_runtime_install,
+            commands::runtimes::java_plan_for,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start the application");

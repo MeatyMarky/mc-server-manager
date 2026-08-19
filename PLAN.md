@@ -364,6 +364,16 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
 
 ---
 
+### Post-phase work — managed JDK downloads  ✅
+- Adoptium API v3 resolution by feature version, OS and architecture (Temurin, hotspot, JDK),
+  tested against recorded fixtures for Windows, Linux and aarch64.
+- Runtimes live under `<data>/runtimes/temurin-<major>/`, one per version, shared by every
+  instance; installs are staged and renamed so a partial extraction is never usable.
+- Selection order: pin, managed, system, then an inline offer naming the version and size.
+- Settings list managed runtimes with sizes and total, refuse deleting one an instance
+  depends on, and carry a "use only system Java" switch.
+- A live `#[ignore]` test downloads a real JDK, unpacks it, probes it and removes it again.
+
 ## 5. Cross-platform rules (enforced from Phase 1)
 
 - Every path built with `PathBuf` / `Path::join`; no `/` or `\` literals; no `to_str().unwrap()`.

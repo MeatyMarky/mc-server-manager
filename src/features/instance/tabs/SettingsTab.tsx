@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/dialog";
 import { Input, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/misc";
 import { JavaSettings } from "@/features/setup/JavaSettings";
+import { JavaPlanNotice, ManagedRuntimes } from "@/features/setup/ManagedRuntimes";
 import { useUpdateInstance } from "@/features/instances/queries";
 import type { InstanceView } from "@/lib/types";
 
@@ -77,6 +78,12 @@ export function SettingsTab({ instance }: { instance: InstanceView }) {
       </section>
 
       <JavaSettings instance={instance} />
+      <JavaPlanNotice
+        mcVersion={instance.mcVersion}
+        recordedMajor={instance.javaMajor}
+        pinned={instance.javaPath}
+      />
+      <ManagedRuntimes />
 
       <section className="grid gap-4">
         <h3 className="text-sm font-semibold">Memory and JVM</h3>

@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/misc";
 import { Input, Select } from "@/components/ui/input";
 import { errorMessage, ipc } from "@/lib/ipc";
+import { JavaPlanNotice } from "@/features/setup/ManagedRuntimes";
 import { toastError } from "@/lib/toast";
 import { SERVER_TYPES, SERVER_TYPE_LABEL } from "@/lib/status";
 import type { ImportCandidate, ServerType } from "@/lib/types";
@@ -156,6 +157,10 @@ export function ImportInstanceDialog({ open: isOpen, onOpenChange }: Props) {
                 />
               </div>
             </div>
+
+            {/* An imported server needs the same Java as one created here, and
+                the same offer if it is missing. */}
+            <JavaPlanNotice mcVersion={mcVersion} />
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setCandidate(null)}>

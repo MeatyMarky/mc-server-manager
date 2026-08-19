@@ -7,6 +7,7 @@ pub mod config;
 pub mod diag;
 pub mod instances;
 pub mod players;
+pub mod runtimes;
 pub mod java;
 pub mod mods;
 pub mod process;
