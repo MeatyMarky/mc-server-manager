@@ -11,16 +11,63 @@ use crate::error::{AppError, AppResult};
 use crate::events;
 use crate::instance;
 use crate::mods::{
-    self, modrinth::Modrinth, mrpack, resolve, source::ModSource, InstallPlan, Loader, ModView,
-    ModsView, Project, SearchQuery, SourceVersion, VersionFilter,
+    self, mrpack, resolve, source::ModSource, AnySource, Category, ContentType, InstallPlan,
+    Loader, ModView, ModsView, SearchPage, SearchQuery, SortBy, SourceId, SourceVersion,
+    VersionFilter,
 };
 use crate::providers;
 use crate::state::AppState;
 
-/// The source to use. One implementation today; adding CurseForge means adding
-/// a variant here, not changing the callers.
-fn source(state: &AppState) -> AppResult<Modrinth> {
-    Modrinth::new(state.rate_limiter.clone())
+/// What a source can do right now, for the picker.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct SourceStatus {
+    pub id: SourceId,
+    pub name: String,
+    /// False when the source needs something before it can be used.
+    pub configured: bool,
+    /// What is missing, and what to do about it.
+    pub needs: Option<String>,
+    /// Where to get what it needs.
+    pub setup_url: Option<String>,
+}
+
+/// The two implementations, side by side. A source that needs a key is listed
+/// whether or not one is set: hiding it would look like the app cannot do it.
+#[tauri::command]
+pub async fn mods_sources(state: State<'_, AppState>) -> AppResult<Vec<SourceStatus>> {
+    let key = curseforge_key(&state).await;
+
+    Ok(vec![
+        SourceStatus {
+            id: SourceId::Modrinth,
+            name: "Modrinth".into(),
+            configured: true,
+            needs: None,
+            setup_url: None,
+        },
+        SourceStatus {
+            id: SourceId::CurseForge,
+            name: "CurseForge".into(),
+            configured: key.is_some(),
+            needs: key.is_none().then(|| {
+                "CurseForge requires every application to use its own API key, so this app \
+                 cannot ship one. Create a free key and paste it into Settings."
+                    .to_string()
+            }),
+            setup_url: Some(crate::mods::curseforge::KEY_URL.to_string()),
+        },
+    ])
+}
+
+async fn curseforge_key(state: &AppState) -> Option<String> {
+    crate::db::setting_get(&state.db, crate::mods::curseforge::KEY_SETTING)
+        .await
+        .ok()
+        .flatten()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
 }
 
 #[tauri::command]
@@ -28,31 +75,114 @@ pub async fn mods_list(state: State<'_, AppState>, id: i64) -> AppResult<ModsVie
     mods::list(&state, id).await
 }
 
-/// Searches, filtered by the instance's loader and Minecraft version.
+/// One page of the browser.
+///
+/// Filtered to the instance's loader and Minecraft version by default; the UI
+/// can ask for everything instead, which is what the "show all" toggle sends.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn mods_search(
     state: State<'_, AppState>,
     id: i64,
+    source: SourceId,
     text: String,
+    content_type: ContentType,
+    sort: SortBy,
+    categories: Vec<String>,
+    filter_to_instance: bool,
     limit: Option<u32>,
     offset: Option<u32>,
-) -> AppResult<Vec<Project>> {
+) -> AppResult<SearchPage> {
     let row = instance::get(&state.db, id).await?;
-    let loader = mods::loader_of(row.server_type, &row.name)?;
 
-    source(&state)?
-        .search(&SearchQuery {
-            text,
-            loaders: loader
-                .accepted()
-                .iter()
-                .map(|loader| loader.to_string())
-                .collect(),
-            game_versions: vec![row.mc_version],
-            limit,
-            offset,
-        })
+    // A client-only kind has no loader to filter by, and a pack is not filtered
+    // by the loader of the instance browsing for it.
+    let filtering = filter_to_instance
+        && !content_type.is_client_only()
+        && content_type != ContentType::Modpack;
+
+    let loaders = if filtering {
+        Loader::for_server_type(row.server_type)
+            .map(|loader| {
+                loader
+                    .accepted()
+                    .iter()
+                    .map(|loader| loader.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let query = SearchQuery {
+        text,
+        loaders,
+        game_versions: if filter_to_instance {
+            vec![row.mc_version]
+        } else {
+            Vec::new()
+        },
+        limit,
+        offset,
+        sort,
+        categories,
+        content_type,
+    };
+
+    AnySource::build(&state, source).await?.search(&query).await
+}
+
+/// The local file for a project's icon, fetching it once.
+///
+/// Returns `null` for a project with no icon; the card draws a placeholder
+/// rather than an empty box.
+#[tauri::command]
+pub async fn mods_icon(state: State<'_, AppState>, url: Option<String>) -> AppResult<Option<String>> {
+    let cached = mods::icons::ensure_cached(&state.http, &state.data_dir, url.as_deref()).await?;
+    Ok(cached.map(|path| path.to_string_lossy().to_string()))
+}
+
+/// The categories a source offers for a kind of content.
+#[tauri::command]
+pub async fn mods_categories(
+    state: State<'_, AppState>,
+    source: SourceId,
+    content_type: ContentType,
+) -> AppResult<Vec<Category>> {
+    AnySource::build(&state, source)
+        .await?
+        .categories(content_type)
         .await
+}
+
+/// The content kinds worth offering for this instance, and whether each is
+/// something it could install.
+#[tauri::command]
+pub async fn mods_content_types(
+    state: State<'_, AppState>,
+    id: i64,
+) -> AppResult<Vec<ContentTypeOption>> {
+    let row = instance::get(&state.db, id).await?;
+    Ok(ContentType::for_server_type(row.server_type)
+        .into_iter()
+        .map(|content_type| ContentTypeOption {
+            content_type,
+            installable: content_type.installable_on(row.server_type),
+            client_only: content_type.is_client_only(),
+        })
+        .collect())
+}
+
+/// One entry of the content-type dropdown.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct ContentTypeOption {
+    pub content_type: ContentType,
+    /// False for what this server cannot load — shown, and marked.
+    pub installable: bool,
+    pub client_only: bool,
 }
 
 /// Versions of a project that suit this instance, newest first.
@@ -60,24 +190,24 @@ pub async fn mods_search(
 pub async fn mods_versions(
     state: State<'_, AppState>,
     id: i64,
+    source: SourceId,
     project_id: String,
 ) -> AppResult<Vec<SourceVersion>> {
     let row = instance::get(&state.db, id).await?;
     let loader = mods::loader_of(row.server_type, &row.name)?;
     let index = providers::index::ensure_fresh(&state.db, &state.http).await?;
+    let filter = VersionFilter {
+        loaders: loader
+            .accepted()
+            .iter()
+            .map(|loader| loader.to_string())
+            .collect(),
+        game_versions: vec![row.mc_version],
+    };
 
-    let mut versions = source(&state)?
-        .versions(
-            &project_id,
-            &VersionFilter {
-                loaders: loader
-                    .accepted()
-                    .iter()
-                    .map(|loader| loader.to_string())
-                    .collect(),
-                game_versions: vec![row.mc_version],
-            },
-        )
+    let mut versions = AnySource::build(&state, source)
+        .await?
+        .versions(&project_id, &filter)
         .await?;
     mods::modrinth::sort_versions(&mut versions, &index);
     Ok(versions)
@@ -89,13 +219,14 @@ pub async fn mods_versions(
 pub async fn mods_plan(
     state: State<'_, AppState>,
     id: i64,
+    source: SourceId,
     project_id: String,
     version_id: Option<String>,
 ) -> AppResult<InstallPlan> {
     let row = instance::get(&state.db, id).await?;
     let loader = mods::loader_of(row.server_type, &row.name)?;
     let index = providers::index::ensure_fresh(&state.db, &state.http).await?;
-    let source = source(&state)?;
+    let source = AnySource::build(&state, source).await?;
 
     let root = match version_id {
         Some(version_id) => source.version(&version_id).await?,
@@ -169,7 +300,7 @@ pub async fn mods_install(
                 },
             );
 
-            let source = match source(&state) {
+            let source = match AnySource::build(&state, planned.source).await {
                 Ok(source) => source,
                 Err(err) => {
                     outcome = Err(err);
@@ -246,7 +377,25 @@ pub async fn mods_check_updates(state: State<'_, AppState>, id: i64) -> AppResul
     let loader = mods::loader_of(row.server_type, &row.name)?;
     let index = providers::index::ensure_fresh(&state.db, &state.http).await?;
 
-    mods::check_updates(&state, id, &source(&state)?, loader, &row.mc_version, &index).await?;
+    // Per source: a version id from one means nothing to the other, and an
+    // unconfigured CurseForge simply has nothing of its own to check.
+    for source_id in [SourceId::Modrinth, SourceId::CurseForge] {
+        match AnySource::build(&state, source_id).await {
+            Ok(source) => {
+                mods::check_updates(
+                    &state,
+                    id,
+                    source_id,
+                    &source,
+                    loader,
+                    &row.mc_version,
+                    &index,
+                )
+                .await?;
+            }
+            Err(err) => tracing::debug!(error = %err, "no update check for this source"),
+        }
+    }
     mods::list(&state, id).await
 }
 

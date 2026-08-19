@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
   Boxes,
-  Download,
   Package,
   Pin,
   PinOff,
@@ -16,7 +15,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge, Switch } from "@/components/ui/misc";
 import { onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes } from "@/lib/format";
@@ -24,14 +22,13 @@ import { ipc } from "@/lib/ipc";
 import { toastError } from "@/lib/toast";
 import type { InstanceView, ModView, Project } from "@/lib/types";
 import { InstallPlanDialog } from "./InstallPlanDialog";
+import { ModBrowser } from "./ModBrowser";
 import { contentLabel, displayName, displayVersion, mismatchSummary, sortForDisplay } from "./modLabels";
 import { PackImportDialog } from "./PackImportDialog";
 
 export function ModsTab({ instance }: { instance: InstanceView }) {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [results, setResults] = useState<Project[] | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [planFor, setPlanFor] = useState<Project | null>(null);
   const [pack, setPack] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -112,18 +109,6 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
     onError: (error: unknown) => toastError(error),
   });
 
-  async function runSearch(event: React.FormEvent) {
-    event.preventDefault();
-    setSearching(true);
-    try {
-      setResults(await ipc.modsSearch(instance.id, search, 20));
-    } catch (error) {
-      toastError(error);
-    } finally {
-      setSearching(false);
-    }
-  }
-
   async function addLocalJar() {
     const picked = await open({
       title: "Choose a jar",
@@ -172,19 +157,14 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <form className="flex flex-wrap items-center gap-2" onSubmit={runSearch}>
-        <div className="relative min-w-48 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="h-8 pl-8 text-xs"
-            placeholder={`Search Modrinth for ${label.toLowerCase()} (${mods.data?.loader ?? ""} ${instance.mcVersion})`}
-            aria-label="Search Modrinth"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </div>
-        <Button type="submit" size="sm" disabled={searching || !search.trim()}>
-          {searching ? "Searching…" : "Search"}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={browsing ? "default" : "outline"}
+          onClick={() => setBrowsing((current) => !current)}
+        >
+          <Search /> {browsing ? "Hide browser" : `Browse ${label.toLowerCase()}`}
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={() => void addLocalJar()}>
           <Package /> Add jar…
@@ -201,7 +181,7 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
         >
           <RefreshCw /> {checkUpdates.isPending ? "Checking…" : "Check updates"}
         </Button>
-      </form>
+      </div>
 
       {busy ? (
         <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -210,46 +190,10 @@ export function ModsTab({ instance }: { instance: InstanceView }) {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {results ? (
-          <section className="mb-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Search results</h3>
-              <Button size="sm" variant="ghost" onClick={() => setResults(null)}>
-                Clear
-              </Button>
-            </div>
-
-            {results.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing matched for {mods.data?.loader} on {instance.mcVersion}.
-              </p>
-            ) : (
-              <ul className="grid gap-2">
-                {results.map((project) => (
-                  <li
-                    key={project.id}
-                    className="flex items-start justify-between gap-3 rounded-md border border-border p-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{project.title}</p>
-                      <p className="line-clamp-2 text-xs text-muted-foreground">
-                        {project.description}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {project.author ? `${project.author} · ` : ""}
-                        {project.downloads
-                          ? `${Number(project.downloads).toLocaleString()} downloads`
-                          : ""}
-                      </p>
-                    </div>
-                    <Button size="sm" onClick={() => setPlanFor(project)}>
-                      <Download /> Install
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+        {browsing ? (
+          <div className="mb-6">
+            <ModBrowser instance={instance} onInstall={(project) => setPlanFor(project)} />
+          </div>
         ) : null}
 
         <section>

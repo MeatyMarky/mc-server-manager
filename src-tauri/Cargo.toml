@@ -29,7 +29,9 @@ sha2 = "0.10.9"
 sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-none", "sqlite", "migrate", "macros", "chrono"] }
 sysinfo = "0.36.1"
 tar = "0.4.46"
-tauri = { version = "2.11.5", features = ["tray-icon"] }
+# `protocol-asset` lets the page read cached mod icons from disk; the scope in
+# tauri.conf.json limits that to the icon cache folder and nothing else.
+tauri = { version = "2.11.5", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-opener = "2.5.4"
 thiserror = "2.0.20"

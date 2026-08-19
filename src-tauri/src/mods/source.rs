@@ -93,6 +93,94 @@ impl Loader {
     }
 }
 
+/// What the browser is showing: mods, plugins, packs, and the client-side kinds
+/// a server has no use for.
+///
+/// Each source calls these something different — a Modrinth "project type", a
+/// CurseForge "class id" — and neither name appears above this boundary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum ContentType {
+    #[default]
+    Mod,
+    Plugin,
+    Modpack,
+    DataPack,
+    ResourcePack,
+    Shader,
+}
+
+impl ContentType {
+    /// True for content a server never loads. Offered anyway, clearly marked,
+    /// because people do browse for what they will hand to their players.
+    pub fn is_client_only(self) -> bool {
+        matches!(self, ContentType::ResourcePack | ContentType::Shader)
+    }
+
+    /// What is worth offering for a server of this type.
+    ///
+    /// A Paper server loads plugins and never mods; a Fabric server the other
+    /// way round. Vanilla loads neither, but still takes data packs.
+    pub fn for_server_type(server_type: ServerType) -> Vec<Self> {
+        let mut kinds = match Loader::for_server_type(server_type) {
+            Some(Loader::Paper) => vec![ContentType::Plugin],
+            Some(_) => vec![ContentType::Mod, ContentType::Modpack],
+            None => vec![],
+        };
+        kinds.push(ContentType::DataPack);
+        kinds.push(ContentType::ResourcePack);
+        kinds.push(ContentType::Shader);
+        kinds
+    }
+
+    /// Whether this instance could install it at all.
+    pub fn installable_on(self, server_type: ServerType) -> bool {
+        !self.is_client_only()
+            && Self::for_server_type(server_type).contains(&self)
+            && self != ContentType::Modpack
+    }
+}
+
+/// How the results are ordered. Mapped onto each source's own parameter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum SortBy {
+    #[default]
+    Relevance,
+    Popularity,
+    Downloads,
+    RecentlyUpdated,
+    Newest,
+}
+
+/// One filterable category, as the source publishes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct Category {
+    /// The value to send back in a search.
+    pub id: String,
+    /// What to show in the dropdown.
+    pub name: String,
+}
+
+/// One page of results, with enough to drive pagination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct SearchPage {
+    pub projects: Vec<Project>,
+    /// Total matches the source reports, when it reports one.
+    #[ts(type = "number | null")]
+    pub total: Option<i64>,
+    #[ts(type = "number")]
+    pub offset: u32,
+    #[ts(type = "number")]
+    pub limit: u32,
+}
+
 /// A project as a search result or a detail view.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -112,6 +200,16 @@ pub struct Project {
     pub categories: Vec<String>,
     /// Loader identifiers the project publishes for.
     pub loaders: Vec<String>,
+    /// When the project last published something, as the source reports it.
+    pub updated: Option<String>,
+    /// What kind of content this is, when the source says.
+    pub content_type: Option<ContentType>,
+    /// False when the source will not serve the files through its API.
+    ///
+    /// CurseForge lets an author forbid third-party downloads, and a browser
+    /// that only fails at install time teaches nobody anything — so the card
+    /// says so and links to the page instead.
+    pub downloadable: bool,
 }
 
 /// One downloadable file of a version.
@@ -199,6 +297,23 @@ pub struct SearchQuery {
     pub limit: Option<u32>,
     #[ts(type = "number | null")]
     pub offset: Option<u32>,
+    #[serde(default)]
+    pub sort: SortBy,
+    /// Category ids from the source's own list; empty means any.
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub content_type: ContentType,
+}
+
+impl SearchQuery {
+    pub fn page_size(&self) -> u32 {
+        self.limit.unwrap_or(20).clamp(1, 100)
+    }
+
+    pub fn page_offset(&self) -> u32 {
+        self.offset.unwrap_or(0)
+    }
 }
 
 /// Which versions of a project are wanted.
@@ -216,8 +331,14 @@ pub struct VersionFilter {
 pub trait ModSource: Send + Sync {
     fn id(&self) -> SourceId;
 
-    fn search(&self, query: &SearchQuery)
-        -> impl Future<Output = AppResult<Vec<Project>>> + Send;
+    fn search(&self, query: &SearchQuery) -> impl Future<Output = AppResult<SearchPage>> + Send;
+
+    /// Categories this source offers for a kind of content, already narrowed to
+    /// what is worth showing for a server.
+    fn categories(
+        &self,
+        content_type: ContentType,
+    ) -> impl Future<Output = AppResult<Vec<Category>>> + Send;
 
     fn project(&self, project_id: &str) -> impl Future<Output = AppResult<Project>> + Send;
 
@@ -317,5 +438,74 @@ mod tests {
         };
         assert_eq!(version.primary_file().unwrap().file_name, "only.jar");
         assert!(!version.is_stable());
+    }
+
+    #[test]
+    fn content_types_follow_the_server_type() {
+        // A Paper server loads plugins, never mods.
+        let paper = ContentType::for_server_type(ServerType::Paper);
+        assert!(paper.contains(&ContentType::Plugin));
+        assert!(!paper.contains(&ContentType::Mod));
+
+        // A Fabric server the other way round, and it can take a pack.
+        let fabric = ContentType::for_server_type(ServerType::Fabric);
+        assert!(fabric.contains(&ContentType::Mod));
+        assert!(fabric.contains(&ContentType::Modpack));
+        assert!(!fabric.contains(&ContentType::Plugin));
+
+        // Vanilla loads neither, but data packs are still worth browsing.
+        let vanilla = ContentType::for_server_type(ServerType::Vanilla);
+        assert!(!vanilla.contains(&ContentType::Mod));
+        assert!(!vanilla.contains(&ContentType::Plugin));
+        assert!(vanilla.contains(&ContentType::DataPack));
+    }
+
+    #[test]
+    fn client_only_content_is_offered_but_marked() {
+        assert!(ContentType::ResourcePack.is_client_only());
+        assert!(ContentType::Shader.is_client_only());
+        assert!(!ContentType::Mod.is_client_only());
+        assert!(!ContentType::DataPack.is_client_only());
+
+        // Every server type can browse them; none can install them.
+        for server_type in [ServerType::Paper, ServerType::Fabric, ServerType::Vanilla] {
+            let kinds = ContentType::for_server_type(server_type);
+            assert!(kinds.contains(&ContentType::Shader), "{server_type:?}");
+            assert!(!ContentType::Shader.installable_on(server_type));
+            assert!(!ContentType::ResourcePack.installable_on(server_type));
+        }
+
+        // A pack is browsed here and installed by creating an instance, not by
+        // dropping files into an existing one.
+        assert!(!ContentType::Modpack.installable_on(ServerType::Fabric));
+        assert!(ContentType::Mod.installable_on(ServerType::Fabric));
+        assert!(ContentType::Plugin.installable_on(ServerType::Paper));
+        assert!(!ContentType::Mod.installable_on(ServerType::Paper));
+    }
+
+    #[test]
+    fn a_query_has_a_sane_page_size_whatever_it_is_asked_for() {
+        let query = SearchQuery::default();
+        assert_eq!(query.page_size(), 20);
+        assert_eq!(query.page_offset(), 0);
+        assert_eq!(query.sort, SortBy::Relevance);
+        assert_eq!(query.content_type, ContentType::Mod);
+
+        let huge = SearchQuery {
+            limit: Some(5_000),
+            offset: Some(40),
+            ..SearchQuery::default()
+        };
+        assert_eq!(huge.page_size(), 100, "a source will not serve more");
+        assert_eq!(huge.page_offset(), 40);
+
+        assert_eq!(
+            SearchQuery {
+                limit: Some(0),
+                ..SearchQuery::default()
+            }
+            .page_size(),
+            1
+        );
     }
 }

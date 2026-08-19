@@ -5,6 +5,8 @@
 //! vanilla loads neither — installing into a vanilla instance is refused with a
 //! sentence saying why rather than silently creating a folder nothing reads.
 
+pub mod curseforge;
+pub mod icons;
 pub mod jarmeta;
 pub mod modrinth;
 pub mod mrpack;
@@ -26,7 +28,100 @@ use crate::state::AppState;
 
 pub use jarmeta::{JarMetadata, Mismatch};
 pub use resolve::{InstallPlan, Installed, PlannedMod};
-pub use source::{Loader, ModSource, Project, SearchQuery, SourceId, SourceVersion, VersionFilter};
+/// Whichever source the caller asked for, as one value.
+///
+/// The trait uses `impl Future`, so it cannot be made into a trait object; an
+/// enum that delegates keeps every call site written once and keeps the two
+/// implementations completely separate, which is the point of the boundary.
+pub enum AnySource {
+    Modrinth(modrinth::Modrinth),
+    CurseForge(curseforge::CurseForge),
+}
+
+impl AnySource {
+    /// Builds the source a caller named, reading whatever configuration it
+    /// needs. A CurseForge without a key is a state with an explanation, not a
+    /// mysterious failure.
+    pub async fn build(state: &crate::state::AppState, id: SourceId) -> AppResult<Self> {
+        match id {
+            SourceId::CurseForge => {
+                let key = crate::db::setting_get(&state.db, curseforge::KEY_SETTING)
+                    .await?
+                    .map(|key| key.trim().to_string())
+                    .filter(|key| !key.is_empty())
+                    .ok_or_else(|| {
+                        AppError::Other(
+                            "CurseForge needs an API key. Add one in Settings — it is free, and \
+                             CurseForge requires every application to use its own."
+                                .to_string(),
+                        )
+                    })?;
+                Ok(AnySource::CurseForge(curseforge::CurseForge::new(
+                    key,
+                    state.rate_limiter.clone(),
+                )?))
+            }
+            // A local jar has no API behind it; searching falls back to the one
+            // source that can answer.
+            _ => Ok(AnySource::Modrinth(modrinth::Modrinth::new(
+                state.rate_limiter.clone(),
+            )?)),
+        }
+    }
+}
+
+impl ModSource for AnySource {
+    fn id(&self) -> SourceId {
+        match self {
+            AnySource::Modrinth(source) => source.id(),
+            AnySource::CurseForge(source) => source.id(),
+        }
+    }
+
+    async fn search(&self, query: &SearchQuery) -> AppResult<SearchPage> {
+        match self {
+            AnySource::Modrinth(source) => source.search(query).await,
+            AnySource::CurseForge(source) => source.search(query).await,
+        }
+    }
+
+    async fn categories(&self, content_type: ContentType) -> AppResult<Vec<Category>> {
+        match self {
+            AnySource::Modrinth(source) => source.categories(content_type).await,
+            AnySource::CurseForge(source) => source.categories(content_type).await,
+        }
+    }
+
+    async fn project(&self, project_id: &str) -> AppResult<Project> {
+        match self {
+            AnySource::Modrinth(source) => source.project(project_id).await,
+            AnySource::CurseForge(source) => source.project(project_id).await,
+        }
+    }
+
+    async fn versions(
+        &self,
+        project_id: &str,
+        filter: &VersionFilter,
+    ) -> AppResult<Vec<SourceVersion>> {
+        match self {
+            AnySource::Modrinth(source) => source.versions(project_id, filter).await,
+            AnySource::CurseForge(source) => source.versions(project_id, filter).await,
+        }
+    }
+
+    async fn version(&self, version_id: &str) -> AppResult<SourceVersion> {
+        match self {
+            AnySource::Modrinth(source) => source.version(version_id).await,
+            AnySource::CurseForge(source) => source.version(version_id).await,
+        }
+    }
+}
+
+pub use source::{
+    Category, ContentType, Loader, ModSource, Project, SearchPage, SearchQuery, SortBy, SourceId,
+    SourceVersion, VersionFilter,
+};
 
 /// Suffix a disabled jar carries. The server ignores it; we rename rather than
 /// move so the file stays next to its siblings.
@@ -560,13 +655,16 @@ pub struct TrackedMod {
     pub project_id: Option<String>,
     pub version_id: Option<String>,
     pub pinned: bool,
+    /// Which source installed it, as stored in `mods.source`.
+    pub source: String,
 }
 
 /// Mods this app installed from a source, which are the only ones it can check
 /// for updates.
 pub async fn tracked(state: &AppState, id: i64) -> AppResult<Vec<TrackedMod>> {
     let rows = sqlx::query_as::<_, TrackedMod>(
-        "SELECT id, file_name, project_id, version_id, pinned FROM mods WHERE instance_id = ?",
+        "SELECT id, file_name, project_id, version_id, pinned, source
+         FROM mods WHERE instance_id = ?",
     )
     .bind(id)
     .fetch_all(&state.db)
@@ -581,6 +679,7 @@ pub async fn tracked(state: &AppState, id: i64) -> AppResult<Vec<TrackedMod>> {
 pub async fn check_updates<S: ModSource>(
     state: &AppState,
     id: i64,
+    source_id: SourceId,
     source: &S,
     loader: Loader,
     mc_version: &str,
@@ -589,6 +688,11 @@ pub async fn check_updates<S: ModSource>(
     let mut found = 0usize;
 
     for entry in tracked(state, id).await? {
+        // Only what this source installed: a version id from the other one
+        // would either miss or, worse, match something unrelated.
+        if entry.source != source_id.as_str() {
+            continue;
+        }
         let (Some(project_id), Some(version_id)) = (entry.project_id, entry.version_id) else {
             continue;
         };

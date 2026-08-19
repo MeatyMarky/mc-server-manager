@@ -26,11 +26,17 @@ import type {
   JavaStatus,
   InstallPlan,
   KeyInfo,
+  Category,
+  ContentType,
+  ContentTypeOption,
   ModView,
   ModsView,
+  SearchPage,
+  SortBy,
+  SourceId,
+  SourceStatus,
   Mutation,
   PackPlan,
-  Project,
   SourceVersion,
   MutationReport,
   ParsedLine,
@@ -191,13 +197,31 @@ export const ipc = {
 
   // Phase 5: mods, plugins and packs.
   modsList: (id: number) => invoke<ModsView>("mods_list", { id }),
-  modsSearch: (id: number, text: string, limit?: number, offset?: number) =>
-    invoke<Project[]>("mods_search", { id, text, limit, offset }),
-  modsVersions: (id: number, projectId: string) =>
-    invoke<SourceVersion[]>("mods_versions", { id, projectId }),
+  /** One page of the browser, from whichever source is selected. */
+  modsSearch: (args: {
+    id: number;
+    source: SourceId;
+    text: string;
+    contentType: ContentType;
+    sort: SortBy;
+    categories: string[];
+    filterToInstance: boolean;
+    limit?: number;
+    offset?: number;
+  }) => invoke<SearchPage>("mods_search", args),
+  /** Which sources exist, and whether each is ready to use. */
+  modsSources: () => invoke<SourceStatus[]>("mods_sources"),
+  modsCategories: (source: SourceId, contentType: ContentType) =>
+    invoke<Category[]>("mods_categories", { source, contentType }),
+  /** The content kinds worth offering for this instance. */
+  modsContentTypes: (id: number) => invoke<ContentTypeOption[]>("mods_content_types", { id }),
+  /** The cached file for an icon, or null when the project has none. */
+  modsIcon: (url: string | null) => invoke<string | null>("mods_icon", { url }),
+  modsVersions: (id: number, source: SourceId, projectId: string) =>
+    invoke<SourceVersion[]>("mods_versions", { id, source, projectId }),
   /** Resolves dependencies. Nothing is downloaded until the plan is confirmed. */
-  modsPlan: (id: number, projectId: string, versionId: string | null) =>
-    invoke<InstallPlan>("mods_plan", { id, projectId, versionId }),
+  modsPlan: (id: number, source: SourceId, projectId: string, versionId: string | null) =>
+    invoke<InstallPlan>("mods_plan", { id, source, projectId, versionId }),
   /** Returns a task id; progress arrives as task events. */
   modsInstall: (id: number, plan: InstallPlan) =>
     invoke<string>("mods_install", { id, plan }),

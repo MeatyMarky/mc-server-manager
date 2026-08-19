@@ -123,3 +123,11 @@ export type { Origin as JavaOrigin } from "./bindings/Origin";
 export type { Health } from "./bindings/Health";
 export type { HealthCheck } from "./bindings/HealthCheck";
 export type { HealthStatus } from "./bindings/HealthStatus";
+
+// Phase 8: the mod browser.
+export type { Category } from "./bindings/Category";
+export type { ContentType } from "./bindings/ContentType";
+export type { ContentTypeOption } from "./bindings/ContentTypeOption";
+export type { SearchPage } from "./bindings/SearchPage";
+export type { SortBy } from "./bindings/SortBy";
+export type { SourceStatus } from "./bindings/SourceStatus";

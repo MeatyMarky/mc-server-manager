@@ -15,7 +15,7 @@ use crate::error::{AppError, AppResult};
 use crate::mcversion::VersionIndex;
 
 use super::source::{
-    DependencyKind, Loader, ModSource, SourceVersion, VersionFilter,
+    DependencyKind, Loader, ModSource, SourceId, SourceVersion, VersionFilter,
 };
 
 /// How deep a dependency chain may go before something is wrong with the data.
@@ -26,6 +26,9 @@ const MAX_DEPTH: usize = 12;
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct PlannedMod {
+    /// Where this came from. Two sources are in play, and a file reference from
+    /// one is meaningless to the other.
+    pub source: SourceId,
     pub project_id: String,
     pub project_title: String,
     pub version_id: String,
@@ -171,6 +174,7 @@ pub async fn plan<S: ModSource>(
 
         let file = version.primary_file();
         install.push(PlannedMod {
+            source: version.source,
             project_id: version.project_id.clone(),
             project_title: title.clone(),
             version_id: version.id.clone(),
@@ -309,12 +313,27 @@ mod tests {
             SourceId::Modrinth
         }
 
-        async fn search(&self, _query: &SearchQuery) -> AppResult<Vec<Project>> {
+        async fn search(&self, query: &SearchQuery) -> AppResult<crate::mods::SearchPage> {
+            Ok(crate::mods::SearchPage {
+                projects: Vec::new(),
+                total: Some(0),
+                offset: query.page_offset(),
+                limit: query.page_size(),
+            })
+        }
+
+        async fn categories(
+            &self,
+            _content_type: crate::mods::ContentType,
+        ) -> AppResult<Vec<crate::mods::Category>> {
             Ok(Vec::new())
         }
 
         async fn project(&self, project_id: &str) -> AppResult<Project> {
             Ok(Project {
+                updated: None,
+                content_type: Some(crate::mods::ContentType::Mod),
+                downloadable: true,
                 source: SourceId::Modrinth,
                 id: project_id.to_string(),
                 slug: project_id.to_string(),

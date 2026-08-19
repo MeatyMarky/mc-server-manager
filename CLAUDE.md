@@ -270,6 +270,24 @@ and is refused with a sentence explaining what to install instead. A jar that de
 different loader or Minecraft version is a **warning**, not a refusal: declarations are
 often conservative and refusing would be wrong more often than warning.
 
+### The browser asks one source at a time, and says which
+`AnySource` is the enum that holds whichever implementation was asked for — the trait uses
+`impl Future`, so it cannot be a trait object, and an enum keeps every call site written
+once. A `PlannedMod` records the source it came from and `check_updates` runs per source,
+because a file reference from one means nothing to the other.
+
+CurseForge requires every application to use its own key and forbids shipping one, so an
+absent key is a *state*: the source is listed as available-but-unconfigured with the reason
+and a link, never hidden. An author may also forbid third-party downloads
+(`allowModDistribution: false`), which produces files with no URL — the card says so and
+links to the page rather than failing at install time.
+
+Content types are offered by server type: Paper browses plugins, the mod loaders browse mods
+and packs, vanilla browses data packs, and the client-only kinds (resource packs, shaders)
+are shown for everyone but marked and never installable. Icons are cached under
+`<data>/cache/icons/` by a hash of their URL and read through the asset protocol, whose
+scope is that folder alone.
+
 ### Dependency resolution is confirmed before anything downloads
 Required dependencies are followed recursively into a plan the user confirms; optional ones
 are listed and never installed on their own; two versions of one project is a conflict that

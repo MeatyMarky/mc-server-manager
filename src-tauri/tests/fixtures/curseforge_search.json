@@ -1,0 +1,51 @@
+{
+  "data": [
+    {
+      "id": 238222,
+      "gameId": 432,
+      "name": "Just Enough Items",
+      "slug": "jei",
+      "links": {
+        "websiteUrl": "https://www.curseforge.com/minecraft/mc-mods/jei",
+        "sourceUrl": null
+      },
+      "summary": "View items and recipes",
+      "status": 4,
+      "downloadCount": 412000000,
+      "classId": 6,
+      "allowModDistribution": true,
+      "dateModified": "2026-07-14T09:21:33.117Z",
+      "dateCreated": "2015-11-23T02:23:25.397Z",
+      "logo": {
+        "id": 29069,
+        "url": "https://media.forgecdn.net/avatars/29/69/635638176075724951.png"
+      },
+      "authors": [{ "id": 32358, "name": "mezz", "url": "https://www.curseforge.com/members/mezz" }],
+      "categories": [
+        { "id": 423, "name": "Map and Information", "isClass": false },
+        { "id": 5191, "name": "Utility & QoL", "isClass": false }
+      ],
+      "latestFilesIndexes": [
+        { "gameVersion": "1.21.4", "fileId": 5300000, "modLoader": 1 },
+        { "gameVersion": "1.21.4", "fileId": 5300001, "modLoader": 6 }
+      ]
+    },
+    {
+      "id": 999001,
+      "gameId": 432,
+      "name": "Restricted Mod",
+      "slug": "restricted-mod",
+      "links": { "websiteUrl": "https://www.curseforge.com/minecraft/mc-mods/restricted-mod" },
+      "summary": "The author has not allowed third-party downloads",
+      "downloadCount": 12345,
+      "classId": 6,
+      "allowModDistribution": false,
+      "dateModified": "2026-05-02T18:00:00Z",
+      "logo": null,
+      "authors": [{ "id": 1, "name": "someone" }],
+      "categories": [{ "id": 424, "name": "Adventure and RPG", "isClass": false }],
+      "latestFilesIndexes": [{ "gameVersion": "1.21.4", "fileId": 5300099, "modLoader": 4 }]
+    }
+  ],
+  "pagination": { "index": 0, "pageSize": 20, "resultCount": 2, "totalCount": 2 }
+}

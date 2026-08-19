@@ -583,6 +583,9 @@ async fn modrinth_search_and_dependency_resolution_work_live() {
 
     let results = modrinth
         .search(&SearchQuery {
+            sort: Default::default(),
+            categories: Vec::new(),
+            content_type: Default::default(),
             text: "lithium".into(),
             loaders: vec!["fabric".into()],
             game_versions: vec!["1.21.4".into()],
@@ -592,7 +595,9 @@ async fn modrinth_search_and_dependency_resolution_work_live() {
         .await
         .expect("search");
 
-    assert!(!results.is_empty(), "search returned nothing");
+    assert!(!results.projects.is_empty(), "search returned nothing");
+    assert!(results.total.unwrap_or(0) > 0, "and it says how many there are");
+    let results = results.projects;
     println!(
         "search: {}",
         results

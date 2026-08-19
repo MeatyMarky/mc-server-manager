@@ -1,0 +1,9 @@
+{
+  "data": [
+    { "id": 6, "gameId": 432, "name": "Mods", "slug": "mc-mods", "isClass": true, "classId": null },
+    { "id": 424, "gameId": 432, "name": "Adventure and RPG", "slug": "adventure-rpg", "isClass": false, "classId": 6 },
+    { "id": 406, "gameId": 432, "name": "World Gen", "slug": "world-gen", "isClass": false, "classId": 6 },
+    { "id": 423, "gameId": 432, "name": "Map and Information", "slug": "map-information", "isClass": false, "classId": 6 },
+    { "id": 5191, "gameId": 432, "name": "Utility & QoL", "slug": "utility-qol", "isClass": false, "classId": 6 }
+  ]
+}

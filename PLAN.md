@@ -374,6 +374,19 @@ a manual smoke check on Windows, and a commit. I stop for your review after each
   depends on, and carry a "use only system Java" switch.
 - A live `#[ignore]` test downloads a real JDK, unpacks it, probes it and removes it again.
 
+### Phase 8 — Mod browser rebuild  ✅
+- A card grid: icon, title, description, author, downloads, last updated, with icons cached
+  on disk and a placeholder for projects without one.
+- Source dropdown over two implementations of `ModSource`: Modrinth, and CurseForge behind a
+  user-supplied API key with its own key panel in Settings.
+- Sort (relevance, popularity, downloads, recently updated, newest), category filter from the
+  source's own list, and a content-type dropdown narrowed to the instance's server type with
+  client-only kinds marked.
+- Paginated at 20 per page, filtered to the instance's loader and version by default with a
+  toggle for everything.
+- Non-distributable CurseForge projects are shown with an explanation and a link, never a
+  failure at install time.
+
 ## 5. Cross-platform rules (enforced from Phase 1)
 
 - Every path built with `PathBuf` / `Path::join`; no `/` or `\` literals; no `to_str().unwrap()`.

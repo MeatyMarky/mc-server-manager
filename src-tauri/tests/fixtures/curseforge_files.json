@@ -1,0 +1,45 @@
+{
+  "data": [
+    {
+      "id": 5300000,
+      "gameId": 432,
+      "modId": 238222,
+      "isAvailable": true,
+      "displayName": "jei-1.21.4-neoforge-19.21.0.247.jar",
+      "fileName": "jei-1.21.4-neoforge-19.21.0.247.jar",
+      "releaseType": 1,
+      "fileStatus": 4,
+      "hashes": [
+        { "value": "A1B2C3D4E5F60718293A4B5C6D7E8F9012345678", "algo": 1 },
+        { "value": "0123456789abcdef0123456789abcdef", "algo": 2 }
+      ],
+      "fileDate": "2026-07-14T09:20:11.42Z",
+      "fileLength": 1284321,
+      "downloadCount": 918273,
+      "downloadUrl": "https://edge.forgecdn.net/files/5300/0/jei-1.21.4-neoforge-19.21.0.247.jar",
+      "gameVersions": ["1.21.4", "NeoForge"],
+      "dependencies": [
+        { "modId": 306612, "relationType": 3 },
+        { "modId": 238086, "relationType": 2 }
+      ]
+    },
+    {
+      "id": 5300099,
+      "gameId": 432,
+      "modId": 999001,
+      "isAvailable": true,
+      "displayName": "restricted-1.21.4-2.0.0-beta.jar",
+      "fileName": "restricted-1.21.4-2.0.0-beta.jar",
+      "releaseType": 2,
+      "fileStatus": 4,
+      "hashes": [],
+      "fileDate": "2026-05-02T17:58:00Z",
+      "fileLength": 55123,
+      "downloadCount": 42,
+      "downloadUrl": null,
+      "gameVersions": ["1.21.4", "Fabric"],
+      "dependencies": []
+    }
+  ],
+  "pagination": { "index": 0, "pageSize": 50, "resultCount": 2, "totalCount": 2 }
+}

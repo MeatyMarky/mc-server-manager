@@ -31,8 +31,10 @@ export function InstallPlanDialog({
   onClose: () => void;
 }) {
   const plan = useQuery({
-    queryKey: ["mod-plan", instance.id, project?.id],
-    queryFn: () => ipc.modsPlan(instance.id, project!.id, null),
+    queryKey: ["mod-plan", instance.id, project?.source, project?.id],
+    // The source the card came from: a CurseForge file id means nothing to
+    // Modrinth, and the other way round.
+    queryFn: () => ipc.modsPlan(instance.id, project!.source, project!.id, null),
     enabled: project !== null,
     retry: false,
   });

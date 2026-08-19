@@ -15,6 +15,7 @@ use crate::mcversion::VersionIndex;
 
 use super::ratelimit::{self, RateLimiter};
 use super::source::{
+    Category, ContentType, SearchPage, SortBy,
     Dependency, DependencyKind, ModSource, Project, SearchQuery, SourceFile, SourceId,
     SourceVersion, VersionFilter,
 };
@@ -130,6 +131,8 @@ fn parse<T: serde::de::DeserializeOwned>(body: &str, url: &str) -> AppResult<T> 
 #[derive(Debug, Deserialize)]
 struct SearchResponse {
     hits: Vec<Hit>,
+    #[serde(default)]
+    total_hits: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,6 +146,8 @@ struct Hit {
     icon_url: Option<String>,
     #[serde(default)]
     categories: Vec<String>,
+    date_modified: Option<String>,
+    project_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,6 +162,8 @@ struct ApiProject {
     loaders: Vec<String>,
     icon_url: Option<String>,
     downloads: Option<i64>,
+    updated: Option<String>,
+    project_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +182,12 @@ struct ApiVersion {
     dependencies: Vec<ApiDependency>,
     #[serde(default)]
     files: Vec<ApiFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiCategory {
+    name: String,
+    project_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,9 +211,14 @@ struct ApiFile {
 // --- Translation into the neutral types ------------------------------------
 
 fn to_project(hit: Hit) -> Project {
+    let content_type = content_type_from_api(hit.project_type.as_deref());
     Project {
         source: SourceId::Modrinth,
-        page_url: Some(format!("https://modrinth.com/mod/{}", hit.slug)),
+        page_url: Some(format!("https://modrinth.com/{}/{}", page_segment(content_type), hit.slug)),
+        updated: hit.date_modified,
+        content_type,
+        // Modrinth serves every file it lists.
+        downloadable: true,
         id: hit.project_id,
         slug: hit.slug,
         title: hit.title,
@@ -218,6 +236,56 @@ fn to_project(hit: Hit) -> Project {
     }
 }
 
+/// Modrinth's own name for a kind of content.
+pub fn project_type_of(content_type: ContentType) -> &'static str {
+    match content_type {
+        ContentType::Mod => "mod",
+        // Modrinth files plugins under "mod" with a loader facet; the loader
+        // facet is what actually narrows it, so the type stays "mod".
+        ContentType::Plugin => "mod",
+        ContentType::Modpack => "modpack",
+        ContentType::DataPack => "datapack",
+        ContentType::ResourcePack => "resourcepack",
+        ContentType::Shader => "shader",
+    }
+}
+
+fn content_type_from_api(project_type: Option<&str>) -> Option<ContentType> {
+    match project_type? {
+        "mod" => Some(ContentType::Mod),
+        "plugin" => Some(ContentType::Plugin),
+        "modpack" => Some(ContentType::Modpack),
+        "datapack" => Some(ContentType::DataPack),
+        "resourcepack" => Some(ContentType::ResourcePack),
+        "shader" => Some(ContentType::Shader),
+        _ => None,
+    }
+}
+
+/// The path segment modrinth.com uses for a project page.
+fn page_segment(content_type: Option<ContentType>) -> &'static str {
+    match content_type {
+        Some(ContentType::Modpack) => "modpack",
+        Some(ContentType::DataPack) => "datapack",
+        Some(ContentType::ResourcePack) => "resourcepack",
+        Some(ContentType::Shader) => "shader",
+        Some(ContentType::Plugin) => "plugin",
+        _ => "mod",
+    }
+}
+
+/// The `index` parameter for a sort order.
+pub fn sort_index(sort: SortBy) -> &'static str {
+    match sort {
+        SortBy::Relevance => "relevance",
+        // Modrinth's "follows" is its popularity signal; downloads is separate.
+        SortBy::Popularity => "follows",
+        SortBy::Downloads => "downloads",
+        SortBy::RecentlyUpdated => "updated",
+        SortBy::Newest => "newest",
+    }
+}
+
 /// Modrinth mixes loader tags into `categories`; only some of them are loaders.
 fn is_loader(category: &str) -> bool {
     matches!(
@@ -227,9 +295,17 @@ fn is_loader(category: &str) -> bool {
 }
 
 fn project_from_api(project: ApiProject) -> Project {
+    let content_type = content_type_from_api(project.project_type.as_deref());
     Project {
         source: SourceId::Modrinth,
-        page_url: Some(format!("https://modrinth.com/mod/{}", project.slug)),
+        page_url: Some(format!(
+            "https://modrinth.com/{}/{}",
+            page_segment(content_type),
+            project.slug
+        )),
+        updated: project.updated,
+        content_type,
+        downloadable: true,
         id: project.id,
         slug: project.slug,
         title: project.title,
@@ -240,6 +316,22 @@ fn project_from_api(project: ApiProject) -> Project {
         categories: project.categories,
         loaders: project.loaders,
     }
+}
+
+/// "worldgen" as it should read in a dropdown.
+fn pretty_category(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for (index, part) in name.split(['-', '_']).enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            out.extend(first.to_uppercase());
+            out.push_str(chars.as_str());
+        }
+    }
+    out
 }
 
 fn dependency_kind(kind: &str) -> DependencyKind {
@@ -297,11 +389,19 @@ pub fn search_url(query: &SearchQuery) -> String {
     if !query.game_versions.is_empty() {
         facets.push(or_facet("versions", &query.game_versions));
     }
+    if !query.categories.is_empty() {
+        facets.push(or_facet("categories", &query.categories));
+    }
+    facets.push(or_facet(
+        "project_type",
+        &[project_type_of(query.content_type).to_string()],
+    ));
 
     let mut url = format!(
-        "{API}/search?limit={}&offset={}",
-        query.limit.unwrap_or(20).clamp(1, 100),
-        query.offset.unwrap_or(0)
+        "{API}/search?limit={}&offset={}&index={}",
+        query.page_size(),
+        query.page_offset(),
+        sort_index(query.sort)
     );
     if !query.text.trim().is_empty() {
         url.push_str(&format!("&query={}", urlencode(query.text.trim())));
@@ -385,9 +485,33 @@ impl ModSource for Modrinth {
         SourceId::Modrinth
     }
 
-    async fn search(&self, query: &SearchQuery) -> AppResult<Vec<Project>> {
+    async fn search(&self, query: &SearchQuery) -> AppResult<SearchPage> {
         let response: SearchResponse = self.get(&search_url(query)).await?;
-        Ok(response.hits.into_iter().map(to_project).collect())
+        Ok(SearchPage {
+            projects: response.hits.into_iter().map(to_project).collect(),
+            total: response.total_hits,
+            offset: query.page_offset(),
+            limit: query.page_size(),
+        })
+    }
+
+    async fn categories(&self, content_type: ContentType) -> AppResult<Vec<Category>> {
+        let all: Vec<ApiCategory> = self.get(&format!("{API}/tag/category")).await?;
+        let wanted = project_type_of(content_type);
+
+        let mut categories: Vec<Category> = all
+            .into_iter()
+            .filter(|category| category.project_type == wanted)
+            // The loader tags live in the same list and are already a separate
+            // control; showing them twice would only confuse the filter.
+            .filter(|category| !is_loader(&category.name))
+            .map(|category| Category {
+                name: pretty_category(&category.name),
+                id: category.name,
+            })
+            .collect();
+        categories.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(categories)
     }
 
     async fn project(&self, project_id: &str) -> AppResult<Project> {
@@ -455,19 +579,77 @@ mod tests {
             game_versions: vec!["1.21.4".into()],
             limit: Some(10),
             offset: None,
+            ..SearchQuery::default()
         });
 
         assert!(url.starts_with("https://api.modrinth.com/v2/search?limit=10"));
         assert!(url.contains("query=fabric%20api"));
-        // [["categories:fabric"],["versions:1.21.4"]], percent-encoded.
-        assert!(url.contains("facets=%5B%5B%22categories%3Afabric%22%5D%2C%5B%22versions%3A1.21.4%22%5D%5D"), "{url}");
+        assert!(url.contains("index=relevance"), "{url}");
+        // The loader, the version and the project type all become facets.
+        assert!(url.contains("categories%3Afabric"), "{url}");
+        assert!(url.contains("versions%3A1.21.4"), "{url}");
+        assert!(url.contains("project_type%3Amod"), "{url}");
     }
 
     #[test]
-    fn a_search_without_filters_asks_for_everything() {
+    fn a_search_without_filters_still_names_the_kind_of_content() {
         let url = search_url(&SearchQuery::default());
-        assert!(!url.contains("facets"));
         assert!(!url.contains("query="));
+        // The project type is always sent: without it a mod search returns
+        // resource packs and shaders alongside the mods.
+        assert!(url.contains("project_type%3Amod"), "{url}");
+    }
+
+    #[test]
+    fn every_sort_maps_onto_modrinths_own_index() {
+        assert_eq!(sort_index(SortBy::Relevance), "relevance");
+        assert_eq!(sort_index(SortBy::Popularity), "follows");
+        assert_eq!(sort_index(SortBy::Downloads), "downloads");
+        assert_eq!(sort_index(SortBy::RecentlyUpdated), "updated");
+        assert_eq!(sort_index(SortBy::Newest), "newest");
+
+        for (sort, expected) in [
+            (SortBy::Downloads, "index=downloads"),
+            (SortBy::Newest, "index=newest"),
+        ] {
+            let url = search_url(&SearchQuery {
+                sort,
+                ..SearchQuery::default()
+            });
+            assert!(url.contains(expected), "{url}");
+        }
+    }
+
+    #[test]
+    fn each_kind_of_content_asks_for_its_own_project_type() {
+        for (content_type, expected) in [
+            (ContentType::Mod, "mod"),
+            (ContentType::Plugin, "mod"),
+            (ContentType::Modpack, "modpack"),
+            (ContentType::DataPack, "datapack"),
+            (ContentType::ResourcePack, "resourcepack"),
+            (ContentType::Shader, "shader"),
+        ] {
+            assert_eq!(project_type_of(content_type), expected);
+        }
+    }
+
+    #[test]
+    fn a_category_filter_is_sent_alongside_the_loader() {
+        let url = search_url(&SearchQuery {
+            loaders: vec!["fabric".into()],
+            categories: vec!["technology".into()],
+            ..SearchQuery::default()
+        });
+        assert!(url.contains("categories%3Afabric"), "{url}");
+        assert!(url.contains("categories%3Atechnology"), "{url}");
+    }
+
+    #[test]
+    fn category_names_are_written_for_a_dropdown() {
+        assert_eq!(pretty_category("technology"), "Technology");
+        assert_eq!(pretty_category("game-mechanics"), "Game Mechanics");
+        assert_eq!(pretty_category("world_gen"), "World Gen");
     }
 
     #[test]
