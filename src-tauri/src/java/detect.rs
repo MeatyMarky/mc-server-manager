@@ -39,6 +39,18 @@ pub struct Probe {
     pub error: Option<String>,
 }
 
+/// The `java` a script launch will pick up: the first one on `PATH`.
+///
+/// Scripts ignore whichever runtime this app chose, so this is the only way to
+/// say which JVM they will really use — and on a Windows box with an Oracle
+/// install, the first entry is often a 32-bit Java 8 shim.
+pub fn java_on_path() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(java_executable_name()))
+        .find(|candidate| candidate.is_file())
+}
+
 pub fn java_executable_name() -> &'static str {
     if cfg!(windows) {
         "java.exe"

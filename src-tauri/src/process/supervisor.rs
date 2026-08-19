@@ -189,9 +189,19 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         return Err(err);
     }
 
-    // Scripts bring their own Java; everything else needs one we can name.
+    // Scripts bring their own Java: they run `java` from PATH and read their
+    // heap from user_jvm_args.txt, so neither the pinned runtime nor the RAM
+    // fields apply. The one thing that can still be checked is whether that
+    // PATH java can hold the heap the script will ask for.
     if instance.launch_kind == crate::db::models::LaunchKind::Script {
-        return Ok(PathBuf::from("java"));
+        let resolved = java::detect::java_on_path().unwrap_or_else(|| PathBuf::from("java"));
+        let heap_mb = launch::script_heap_mb(&dir);
+        report_choice(state, instance, &resolved, heap_mb, "PATH (start script)").await;
+
+        if let Some(requested_mb) = heap_mb {
+            check_heap(state, &resolved, requested_mb).await?;
+        }
+        return Ok(resolved);
     }
 
     let required = instance
@@ -201,6 +211,14 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
     if let Some(pinned) = &instance.java_path {
         let path = PathBuf::from(pinned);
         if path.is_file() {
+            report_choice(
+                state,
+                instance,
+                &path,
+                launch::effective_heap_mb(instance),
+                "pinned for this server",
+            )
+            .await;
             check_heap_fits(state, instance, &path).await?;
             return Ok(path);
         }
@@ -212,6 +230,14 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
 
     if let Some(runtime) = java::best_for(&state.db, required).await? {
         let path = PathBuf::from(runtime.path);
+        report_choice(
+            state,
+            instance,
+            &path,
+            launch::effective_heap_mb(instance),
+            "chosen automatically",
+        )
+        .await;
         check_heap_fits(state, instance, &path).await?;
         return Ok(path);
     }
@@ -241,11 +267,17 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
 /// to diagnose. Checking here means the error can name the binary, its width and
 /// the way out.
 async fn check_heap_fits(state: &AppState, instance: &Instance, java: &Path) -> AppResult<()> {
-    let jvm_args: Vec<String> = serde_json::from_str(&instance.jvm_args).unwrap_or_default();
-    let Some(heap_bytes) = launch::max_heap_bytes(instance.max_ram_mb, &jvm_args) else {
+    // The heap comes from the launch plan's own resolution — RAM fields first,
+    // custom -Xmx last and winning — not from the arguments string alone. An
+    // instance whose 8192 MB lives in the RAM field has no -Xmx to find.
+    let Some(requested_mb) = launch::effective_heap_mb(instance) else {
         return Ok(());
     };
-    let requested_mb = (heap_bytes / (1024 * 1024)) as i64;
+    check_heap(state, java, requested_mb).await
+}
+
+/// The check itself, for callers that resolve the heap differently (scripts).
+async fn check_heap(state: &AppState, java: &Path, requested_mb: i64) -> AppResult<()> {
     if requested_mb <= crate::java::version::MAX_HEAP_32BIT_MB {
         return Ok(());
     }
@@ -258,6 +290,45 @@ async fn check_heap_fits(state: &AppState, instance: &Instance, java: &Path) -> 
         });
     }
     Ok(())
+}
+
+/// Records which JVM a launch resolved to, and how wide it is.
+///
+/// Nothing in the console says which `java` was used, so a JVM that refuses the
+/// heap looks like the app misbehaving. This line, at info level and on every
+/// attempt, is the first thing to look at when a start fails.
+async fn report_choice(
+    state: &AppState,
+    instance: &Instance,
+    java: &Path,
+    heap_mb: Option<i64>,
+    how: &str,
+) {
+    let bits = java::bits_of(&state.db, java).await;
+    tracing::info!(
+        instance = %instance.name,
+        java = %java.display(),
+        bits = bits.map(|b| b.to_string()).unwrap_or_else(|| "unknown".into()),
+        heap_mb = heap_mb.unwrap_or(0),
+        selection = how,
+        launch_kind = ?instance.launch_kind,
+        "resolved Java for launch"
+    );
+
+    if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
+        buffer.push_system(&format!(
+            "Java: {} ({}, {how}){}",
+            java.display(),
+            match bits {
+                Some(bits) => format!("{bits}-bit"),
+                None => "width unknown".to_string(),
+            },
+            match heap_mb {
+                Some(mb) => format!(", heap {mb} MB"),
+                None => String::new(),
+            }
+        ));
+    }
 }
 
 /// Starts a server. Returns once the process is spawned; readiness arrives later
@@ -1197,5 +1268,107 @@ mod tests {
         assert!(check_heap_fits(&state, &instance, Path::new("/nowhere/bin/java"))
             .await
             .is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_ram_field_alone_is_enough_to_refuse_a_32_bit_jvm() {
+        // The reported instance: 8192 MB in the RAM field, custom arguments
+        // that tune the collector and say nothing about the heap. Nothing here
+        // contains "-Xmx", so a check that reads only the arguments finds
+        // nothing to object to and the JVM refuses at spawn instead.
+        let (state, instance) = heap_case(
+            8192,
+            r#"["-XX:+UseG1GC","-XX:+ParallelRefProcEnabled","-XX:+UnlockExperimentalVMOptions","-XX:+DisableExplicitGC"]"#,
+        )
+        .await;
+        assert_eq!(launch::effective_heap_mb(&instance), Some(8192));
+
+        let java = "C:/Program Files (x86)/Java/jre1.8.0_501/bin/java.exe";
+        seed_java(&state, java, 32).await;
+
+        let err = check_heap_fits(&state, &instance, Path::new(java))
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), "java_32bit");
+        assert!(err.user_message().contains("8192"), "{}", err.user_message());
+    }
+
+    #[tokio::test]
+    async fn preflight_refuses_before_anything_is_spawned() {
+        // End to end through preflight rather than the check alone: a pinned
+        // 32-bit runtime plus the RAM field must not reach `launch::plan`.
+        let dir = tempfile::tempdir().unwrap();
+        let instance_dir = dir.path().join("survival");
+        std::fs::create_dir_all(&instance_dir).unwrap();
+        std::fs::write(instance_dir.join("server.jar"), b"jar").unwrap();
+
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, dir.path().to_path_buf());
+        let now = now_rfc3339();
+        let java = dir.path().join("java32.exe");
+        std::fs::write(&java, b"not really java").unwrap();
+
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                launch_target, installed_at, eula_accepted, java_path, jvm_args, server_args,
+                min_ram_mb, max_ram_mb, created_at, updated_at)
+             VALUES ('u1', 'Survival', ?, 'fabric', '26.2', 'jar', 'server.jar', ?, 1, ?, '[]', '[]',
+                1024, 8192, ?, ?)",
+        )
+        .bind(instance_dir.to_string_lossy().to_string())
+        .bind(&now)
+        .bind(java.to_string_lossy().to_string())
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO java_runtimes (path, major, bits, source, valid, detected_at)
+             VALUES (?, 25, 32, 'manual', 1, ?)",
+        )
+        .bind(java.to_string_lossy().to_string())
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let instance = instance::get(&state.db, 1).await.unwrap();
+        let err = preflight(&state, &instance).await.unwrap_err();
+        assert_eq!(err.kind(), "java_32bit");
+    }
+
+    #[tokio::test]
+    async fn a_script_launch_is_checked_against_the_java_it_will_really_use() {
+        // Scripts ignore the app's chosen runtime and the RAM fields: they run
+        // `java` from PATH with whatever user_jvm_args.txt says. That was the
+        // one launch path with no check at all.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("user_jvm_args.txt"),
+            b"-Xmx8G\n",
+        )
+        .unwrap();
+        assert_eq!(launch::script_heap_mb(dir.path()), Some(8192));
+
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, std::env::temp_dir());
+        let java = "C:/Program Files (x86)/Common Files/Oracle/Java/java8path/java.exe";
+        sqlx::query(
+            "INSERT INTO java_runtimes (path, major, bits, source, valid, detected_at)
+             VALUES (?, 8, 32, 'path', 1, ?)",
+        )
+        .bind(java)
+        .bind(now_rfc3339())
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let err = check_heap(&state, Path::new(java), 8192).await.unwrap_err();
+        assert_eq!(err.kind(), "java_32bit");
+
+        // A script asking for a heap the 32-bit JVM can hold still runs.
+        assert!(check_heap(&state, Path::new(java), 1024).await.is_ok());
     }
 }

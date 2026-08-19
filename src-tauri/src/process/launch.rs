@@ -31,6 +31,32 @@ pub fn heap_args(min_ram_mb: i64, max_ram_mb: i64) -> Vec<String> {
     vec![format!("-Xms{min}M"), format!("-Xmx{max}M")]
 }
 
+/// The heap this instance will really run with, in MB, resolved the same way
+/// `plan` builds the command line.
+///
+/// `plan` writes `-Xms/-Xmx` from the RAM fields first and appends the custom
+/// JVM arguments after them, so a custom `-Xmx` wins and the RAM field is what
+/// applies when there is none. Anything checking the heap has to resolve it
+/// through here rather than reading either source on its own.
+pub fn effective_heap_mb(instance: &Instance) -> Option<i64> {
+    let jvm_args: Vec<String> = decode_list(&instance.jvm_args);
+    max_heap_bytes(instance.max_ram_mb, &jvm_args).map(|bytes| (bytes / (1024 * 1024)) as i64)
+}
+
+/// A script launch runs `run.bat`/`run.sh`, which reads its own JVM arguments
+/// from `user_jvm_args.txt` next to it. The app's RAM fields do not apply, so
+/// this is the only place a script's heap can come from.
+pub fn script_heap_mb(instance_dir: &Path) -> Option<i64> {
+    let text = std::fs::read_to_string(instance_dir.join("user_jvm_args.txt")).ok()?;
+    text.lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.starts_with('#'))
+        .flat_map(|line| line.split_whitespace())
+        .filter_map(parse_xmx)
+        .next_back()
+        .map(|bytes| (bytes / (1024 * 1024)) as i64)
+}
+
 /// The heap the JVM will actually be given, in bytes.
 ///
 /// The instance's RAM setting is the default, but a custom `-Xmx` in the JVM
@@ -330,5 +356,64 @@ mod tests {
         assert_eq!(parse_xmx("-Xms1G"), None, "the minimum is not the maximum");
         assert_eq!(parse_xmx("-XX:+UseG1GC"), None);
         assert_eq!(parse_xmx("-Xmxlots"), None);
+    }
+
+    #[test]
+    fn the_effective_heap_is_the_ram_field_when_nothing_overrides_it() {
+        // The shape that got past the first version of the guard: 8192 in the
+        // RAM field and not an -Xmx in sight.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("server.jar"), b"jar").unwrap();
+        let mut instance = instance(LaunchKind::Jar, "server.jar", dir.path());
+        instance.max_ram_mb = 8192;
+        instance.jvm_args = r#"["-XX:+UseG1GC","-XX:+ParallelRefProcEnabled"]"#.into();
+
+        assert_eq!(effective_heap_mb(&instance), Some(8192));
+
+        // And it is the same number the command line carries, which is what
+        // makes checking it meaningful.
+        let plan = plan(&instance, Path::new("/jdk/bin/java")).unwrap();
+        assert!(
+            plan.args.contains(&"-Xmx8192M".to_string()),
+            "{:?}",
+            plan.args
+        );
+    }
+
+    #[test]
+    fn a_custom_xmx_wins_because_the_plan_appends_it_after_the_ram_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("server.jar"), b"jar").unwrap();
+        let mut instance = instance(LaunchKind::Jar, "server.jar", dir.path());
+        instance.max_ram_mb = 1024;
+        instance.jvm_args = r#"["-Xmx6G"]"#.into();
+
+        assert_eq!(effective_heap_mb(&instance), Some(6144));
+
+        let plan = plan(&instance, Path::new("/jdk/bin/java")).unwrap();
+        let generated = plan.args.iter().position(|a| a == "-Xmx1024M").unwrap();
+        let custom = plan.args.iter().position(|a| a == "-Xmx6G").unwrap();
+        assert!(custom > generated, "the JVM reads the last one: {:?}", plan.args);
+    }
+
+    #[test]
+    fn a_script_takes_its_heap_from_user_jvm_args_not_from_the_ram_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(script_heap_mb(dir.path()), None, "no file, nothing to say");
+
+        std::fs::write(
+            dir.path().join("user_jvm_args.txt"),
+            b"# Xmx and Xms set the maximum and minimum RAM usage\n-Xmx8G\n-XX:+UseG1GC\n",
+        )
+        .unwrap();
+        assert_eq!(script_heap_mb(dir.path()), Some(8192));
+
+        // Commented-out settings are not settings.
+        std::fs::write(dir.path().join("user_jvm_args.txt"), b"#-Xmx8G\n").unwrap();
+        assert_eq!(script_heap_mb(dir.path()), None);
+
+        // Several on one line, last wins, same as the JVM.
+        std::fs::write(dir.path().join("user_jvm_args.txt"), b"-Xmx2G -Xmx4G\n").unwrap();
+        assert_eq!(script_heap_mb(dir.path()), Some(4096));
     }
 }

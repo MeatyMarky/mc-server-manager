@@ -91,9 +91,19 @@ one deserves an explanation rather than a disappearance. A row with no recorded 
 treated the same and re-probed on the next scan; assuming 64-bit is what let a
 `Program Files (x86)` Java 8 be picked in the first place.
 
-Preflight then refuses a launch the JVM would reject anyway: 32-bit plus an `-Xmx` above
-`MAX_HEAP_32BIT_MB` (1500) fails with the binary's path, its width and the way out, because
-the JVM's own "Invalid maximum heap size: -Xmx8192M" never says which Java produced it.
+Preflight then refuses a launch the JVM would reject anyway: 32-bit plus an effective heap
+above `MAX_HEAP_32BIT_MB` (1500) fails with the binary's path, its width and the way out,
+because the JVM's own "Invalid maximum heap size: -Xmx8192M" never says which Java produced
+it. **The heap comes from `launch::effective_heap_mb`**, which resolves it the way `plan`
+builds the command line — RAM fields first, a custom `-Xmx` appended after and therefore
+winning — so an instance whose 8 GB lives in the RAM field is checked like any other. A
+script launch resolves neither: it runs `java` from `PATH` with the heap in
+`user_jvm_args.txt`, so both are read (`detect::java_on_path`, `launch::script_heap_mb`) and
+checked the same way.
+
+Every launch attempt logs the resolved binary, its recorded width, the effective heap and
+how it was chosen — at info level and into the instance console. Without that line, a JVM
+that refuses to start looks like the app misbehaving.
 
 ### A start that never finished is not a crash
 Auto-restart exists for a server that was running and died. A process that exits before the
