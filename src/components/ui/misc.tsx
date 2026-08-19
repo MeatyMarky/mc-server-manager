@@ -42,7 +42,10 @@ export function TabsContent({
 }: React.ComponentProps<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
-      className={cn("mt-4 flex-1 overflow-y-auto focus-visible:outline-none", className)}
+      className={cn(
+        "mt-4 min-h-0 flex-1 overflow-y-auto focus-visible:outline-none",
+        className,
+      )}
       {...props}
     />
   );

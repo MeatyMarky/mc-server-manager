@@ -131,9 +131,15 @@ body {
   to { opacity: 1; }
 }
 
+/* Only opacity and scale: the centring is `translate: -50% -50%` from the
+   utility classes, and Tailwind v4 writes that to the `translate` property.
+   Animating `transform` here as well stacked the two, which pushed every dialog
+   up and to the left — at a small window height its top edge ended up above the
+   viewport, with no way to scroll to it. `scale` is animated as its own
+   property for the same reason. */
 @keyframes content-in {
-  from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; scale: 0.97; }
+  to { opacity: 1; scale: 1; }
 }
 
 [data-slot="dialog-overlay"][data-state="open"] {

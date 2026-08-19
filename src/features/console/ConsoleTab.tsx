@@ -11,7 +11,7 @@ import { InstallPanel } from "@/features/setup/InstallPanel";
 import { toastError } from "@/lib/toast";
 import type { InstanceView, LogLevel } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { filterLines, historyStep, useConsole } from "./useConsole";
+import { filterLines, historyStep, isAtBottom, useConsole } from "./useConsole";
 
 const LEVEL_CLASS: Record<LogLevel, string> = {
   trace: "text-muted-foreground",
@@ -37,12 +37,35 @@ export function ConsoleTab({
   const [draft, setDraft] = useState("");
   const [historyIndex, setHistoryIndex] = useState(-1);
   const scroller = useRef<HTMLDivElement>(null);
+  // Set while this component is the one moving the scrollbar. Without it the
+  // jump to the bottom fires `onScroll`, that handler sees "at the bottom" and
+  // turns autoscroll back on — so on a server printing continuously, scrolling
+  // up releases autoscroll for a few milliseconds and is then undone by the
+  // next batch. Scrolling away becomes impossible, which is exactly the
+  // symptom: every new line snaps the view back down.
+  const selfScrolling = useRef(false);
 
   const visible = useMemo(() => filterLines(lines, search), [lines, search]);
 
   useEffect(() => {
-    if (!autoscroll || !scroller.current) return;
-    scroller.current.scrollTop = scroller.current.scrollHeight;
+    const element = scroller.current;
+    if (!autoscroll || !element) return;
+
+    // Only arm the guard when the view really moves. A jump that changes
+    // nothing produces no scroll event, and a flag left standing would swallow
+    // the user's next scroll instead of the app's own.
+    if (Math.abs(element.scrollTop - element.scrollHeight) <= 1) return;
+
+    selfScrolling.current = true;
+    element.scrollTop = element.scrollHeight;
+
+    // The browser delivers the matching event on a later frame. Clearing the
+    // flag on the next frame as well means it can never outlive the jump, even
+    // if that event never comes.
+    const frame = requestAnimationFrame(() => {
+      selfScrolling.current = false;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [visible, autoscroll]);
 
   const canSend = instance.status === "running" || instance.status === "starting";
@@ -129,13 +152,20 @@ export function ConsoleTab({
         // the user's own pace.
         aria-relevant="additions text"
         aria-atomic="false"
-        className="min-h-64 flex-1 overflow-y-auto rounded-md border border-border bg-card/40 p-3 font-mono text-xs leading-relaxed"
+        // `min-h-0` so the console can shrink inside the tab at a small window
+        // height instead of pushing its own scrollbar out of reach, and
+        // `overscroll-contain` so reaching the top does not scroll the page
+        // behind it.
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-md border border-border bg-card/40 p-3 font-mono text-xs leading-relaxed"
         onScroll={(event) => {
-          // Scrolling away from the bottom turns autoscroll off, the way a
-          // terminal does; scrolling back to the bottom turns it on again.
-          const element = event.currentTarget;
-          const atBottom =
-            element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+          // The jump this component just made is not the user scrolling.
+          if (selfScrolling.current) {
+            selfScrolling.current = false;
+            return;
+          }
+          // Anything else is: scrolling away from the bottom releases
+          // autoscroll the way a terminal does, and coming back re-arms it.
+          const atBottom = isAtBottom(event.currentTarget);
           if (atBottom !== autoscroll) setAutoscroll(atBottom);
         }}
       >

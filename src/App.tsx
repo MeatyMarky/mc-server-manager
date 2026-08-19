@@ -62,7 +62,7 @@ export default function App() {
         onImport={() => setImporting(true)}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex justify-end gap-1 px-6 pt-4">
           <Button
             variant="ghost"

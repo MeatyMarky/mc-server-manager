@@ -10,6 +10,26 @@ import type { ParsedLine } from "@/lib/types";
 /** Matches the backend ring buffer, so scrollback is the same on both sides. */
 export const MAX_LINES = 5_000;
 
+/// How close to the bottom still counts as "at the bottom".
+///
+/// One line of the console is about 16px; a couple of lines of slack keeps a
+/// half-pixel layout rounding or a trailing partial line from reading as "the
+/// user scrolled away".
+export const BOTTOM_THRESHOLD_PX = 24;
+
+/**
+ * Whether a scroll container is parked at its bottom.
+ *
+ * Split out from the component because the autoscroll rule is the whole of the
+ * console's scrolling behaviour and it is worth testing without a browser.
+ */
+export function isAtBottom(
+  metrics: { scrollHeight: number; scrollTop: number; clientHeight: number },
+  threshold = BOTTOM_THRESHOLD_PX,
+): boolean {
+  return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight <= threshold;
+}
+
 /** Appends a batch, dropping the oldest lines past the cap. */
 export function appendLines(current: ParsedLine[], incoming: ParsedLine[]): ParsedLine[] {
   if (incoming.length === 0) return current;

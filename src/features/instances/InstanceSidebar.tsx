@@ -79,7 +79,10 @@ export function InstanceSidebar({
         />
       </div>
 
-      <nav aria-label="Instances" className="flex-1 overflow-y-auto px-2 pb-3">
+      <nav
+        aria-label="Instances"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3"
+      >
         {isLoading ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">Loading…</p>
         ) : visible.length === 0 ? (

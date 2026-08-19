@@ -372,6 +372,20 @@ Do not hand-edit it.
 - Instance detail has exactly these tabs: Console, Mods, Config, Players, Worlds, Backups,
   Settings.
 - Everything is keyboard-navigable. The console has an autoscroll toggle, search, and copy.
+- **Scrolling containers are built for a small window.** Every flex column between the
+  window and a scroll area carries `min-h-0`, or the child cannot shrink, grows past the
+  window, and `body { overflow: hidden }` makes the overflow unreachable — `TabsContent`
+  sets it for every tab so none can forget. Dialogs cap at `max-h-[90vh]` with
+  `overflow-y-auto`, and `DialogFooter` is sticky so its buttons stay reachable while the
+  content above scrolls. The open animation may only animate `opacity` and `scale`:
+  animating `transform` stacks with Tailwind's `translate` centring and pushes the dialog
+  off screen.
+- **The console's autoscroll releases on a user scroll and only on a user scroll.** The jump
+  to the bottom sets a flag that the next scroll event clears, because the browser delivers
+  that event a frame later and it is otherwise indistinguishable from the user returning —
+  which is what made scrolling up impossible on a server printing continuously. The flag is
+  only armed when the view really moves, and is cleared on the next frame regardless, so it
+  can never swallow a real scroll.
 - Destructive actions (delete instance, delete world, restore backup) require an explicit
   confirmation naming the target.
 

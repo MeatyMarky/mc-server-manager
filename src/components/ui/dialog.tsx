@@ -23,7 +23,10 @@ export function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto rounded-lg border border-border bg-card p-6 shadow-lg",
+          // A tall dialog scrolls inside itself rather than growing past the
+          // window: `max-h` plus `overflow-y-auto`, with `overscroll-contain`
+          // so reaching the end does not start scrolling whatever is behind it.
+          "fixed left-1/2 top-1/2 z-50 grid max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-6 shadow-lg",
           className,
         )}
         {...props}
@@ -47,7 +50,14 @@ export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLD
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)}
+      // Sticky, because the buttons are the point of the dialog: at a small
+      // window height the content above them scrolls, and a footer that scrolled
+      // away with it would leave no way to confirm or cancel without scrolling
+      // blindly to the bottom first.
+      className={cn(
+        "sticky bottom-0 -mx-6 -mb-6 flex flex-col-reverse gap-2 border-t border-border bg-card px-6 py-4 sm:flex-row sm:justify-end",
+        className,
+      )}
       {...props}
     />
   );
