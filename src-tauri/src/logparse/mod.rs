@@ -94,6 +94,59 @@ pub enum LogEvent {
     Crash { detail: String },
     /// World save finished; backups wait for this.
     Saved,
+    /// The server's class files are newer than the JVM running them.
+    ///
+    /// The JVM reports this in class file versions, which nobody thinks in:
+    /// "class file version 69.0 … up to 61.0" means the server needs Java 25
+    /// and got Java 17. Both numbers are translated here so the UI never has to.
+    ClassVersion {
+        /// Java feature version the server was built for.
+        needs: i64,
+        /// Java feature version that tried to run it.
+        found: i64,
+        /// The class named in the message, for the technical detail.
+        class_name: Option<String>,
+    },
+}
+
+/// Class file 45 is Java 1.1, and every release since has added one.
+pub fn java_from_class_version(class_version: f64) -> i64 {
+    (class_version.trunc() as i64) - 44
+}
+
+/// Reads both numbers out of an `UnsupportedClassVersionError`.
+///
+/// The message has been stable for two decades: "X has been compiled by a more
+/// recent version of the Java Runtime (class file version A), this version of
+/// the Java Runtime only recognizes class file versions up to B".
+pub fn parse_class_version_error(message: &str) -> Option<LogEvent> {
+    if !message.contains("UnsupportedClassVersionError")
+        && !message.contains("class file version")
+    {
+        return None;
+    }
+
+    let numbers: Vec<f64> = message
+        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .filter(|token| token.contains('.'))
+        .filter_map(|token| token.parse::<f64>().ok())
+        .filter(|value| (45.0..=200.0).contains(value))
+        .collect();
+    let (needs, found) = match numbers.as_slice() {
+        [needs, found, ..] => (*needs, *found),
+        _ => return None,
+    };
+
+    let class_name = message
+        .split_whitespace()
+        .find(|token| token.contains('/') && !token.contains("://"))
+        .map(|token| token.trim_end_matches(':').replace('/', "."));
+
+    Some(LogEvent::ClassVersion {
+        needs: java_from_class_version(needs),
+        found: java_from_class_version(found),
+        class_name,
+    })
 }
 
 /// Strips a `[…]` or `(…)` prefix, returning its contents and the rest.
@@ -251,6 +304,10 @@ pub fn detect_event(message: &str) -> Option<LogEvent> {
         return Some(LogEvent::PortInUse {
             detail: message.to_string(),
         });
+    }
+
+    if let Some(event) = parse_class_version_error(message) {
+        return Some(event);
     }
 
     if lower.contains("crash report")
@@ -559,5 +616,65 @@ mod tests {
             let (_, _, _, message) = parse_line(raw, false);
             matches!(detect_event(&message), Some(LogEvent::PortInUse { .. }))
         }));
+    }
+
+    /// The real line this app was shown, from a Fabric 26.2 server on Java 17.
+    const CLASS_VERSION_ERROR: &str = "Caused by: java.lang.UnsupportedClassVersionError: \
+net/minecraft/bundler/Main has been compiled by a more recent version of the Java Runtime \
+(class file version 69.0), this version of the Java Runtime only recognizes class file \
+versions up to 61.0";
+
+    #[test]
+    fn class_file_versions_become_java_versions() {
+        // 45 is Java 1.1, and every release since adds one.
+        assert_eq!(java_from_class_version(45.0), 1);
+        assert_eq!(java_from_class_version(52.0), 8);
+        assert_eq!(java_from_class_version(61.0), 17);
+        assert_eq!(java_from_class_version(65.0), 21);
+        assert_eq!(java_from_class_version(69.0), 25);
+    }
+
+    #[test]
+    fn an_unsupported_class_version_is_translated_into_java_versions() {
+        let event = detect_event(CLASS_VERSION_ERROR).expect("recognised");
+        match event {
+            LogEvent::ClassVersion {
+                needs,
+                found,
+                class_name,
+            } => {
+                assert_eq!(needs, 25, "class file 69 is Java 25");
+                assert_eq!(found, 17, "class file 61 is Java 17");
+                assert_eq!(class_name.as_deref(), Some("net.minecraft.bundler.Main"));
+            }
+            other => panic!("wrong event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_same_message_is_recognised_without_the_exception_name() {
+        // Some launchers print only the tail of the message.
+        let short = "Main has been compiled by a more recent version of the Java Runtime \
+                     (class file version 65.0), this version of the Java Runtime only \
+                     recognizes class file versions up to 61.0";
+        assert!(matches!(
+            detect_event(short),
+            Some(LogEvent::ClassVersion { needs: 21, found: 17, .. })
+        ));
+    }
+
+    #[test]
+    fn ordinary_lines_are_not_mistaken_for_a_class_version_error() {
+        assert!(!matches!(
+            detect_event("Done (7.214s)! For help, type \"help\""),
+            Some(LogEvent::ClassVersion { .. })
+        ));
+        assert!(!matches!(
+            detect_event("Loading 42 mods, version 1.21.4"),
+            Some(LogEvent::ClassVersion { .. })
+        ));
+        // A mention with no numbers in it cannot be translated, so it is not
+        // claimed as one.
+        assert!(parse_class_version_error("UnsupportedClassVersionError somewhere").is_none());
     }
 }

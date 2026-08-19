@@ -24,6 +24,9 @@ pub struct LaunchPlan {
     pub is_script: bool,
 }
 
+/// Keeps a server from opening GUI windows — Swing error dialogs in particular.
+pub const HEADLESS_FLAG: &str = "-Djava.awt.headless=true";
+
 /// Heap flags derived from the instance's RAM settings.
 pub fn heap_args(min_ram_mb: i64, max_ram_mb: i64) -> Vec<String> {
     let min = min_ram_mb.max(128);
@@ -265,6 +268,12 @@ pub fn plan(instance: &Instance, java: &Path) -> AppResult<LaunchPlan> {
             // because that is the existing behaviour people rely on.
             let custom = decode_list(&instance.jvm_args);
             let mut args = heap_args_resolved(instance.min_ram_mb, instance.max_ram_mb, &custom);
+            // A server has no business opening a window. Fabric's launcher shows
+            // its errors in a Swing dialog otherwise, which on a manager means a
+            // stray window with the message this app should be showing.
+            if !custom.iter().any(|arg| arg.starts_with("-Djava.awt.headless")) {
+                args.push(HEADLESS_FLAG.to_string());
+            }
             args.extend(custom.iter().filter(|arg| !is_heap_flag(arg)).cloned());
 
             if instance.launch_kind == LaunchKind::Jar {
@@ -368,7 +377,17 @@ mod tests {
         assert_eq!(plan.program, PathBuf::from("/opt/java/bin/java"));
         assert_eq!(
             plan.args,
-            vec!["-Xms1024M", "-Xmx4096M", "-XX:+UseG1GC", "-jar", "server.jar", "--nogui"]
+            vec![
+                "-Xms1024M",
+                "-Xmx4096M",
+                // Every server launch is headless: a manager must never leave a
+                // Swing dialog on screen from a process it owns.
+                HEADLESS_FLAG,
+                "-XX:+UseG1GC",
+                "-jar",
+                "server.jar",
+                "--nogui"
+            ]
         );
         assert_eq!(plan.working_dir, dir.path());
         assert!(!plan.is_script);
@@ -454,7 +473,10 @@ mod tests {
         inst.server_args = "also not json".into();
 
         let plan = plan(&inst, Path::new("java")).unwrap();
-        assert_eq!(plan.args, vec!["-Xms1024M", "-Xmx4096M", "-jar", "server.jar"]);
+        assert_eq!(
+            plan.args,
+            vec!["-Xms1024M", "-Xmx4096M", HEADLESS_FLAG, "-jar", "server.jar"]
+        );
     }
 
     #[test]
@@ -638,5 +660,41 @@ mod tests {
         // Several on one line, last wins, same as the JVM.
         std::fs::write(dir.path().join("user_jvm_args.txt"), b"-Xmx2G -Xmx4G\n").unwrap();
         assert_eq!(script_heap_mb(dir.path()), Some(4096));
+    }
+
+    #[test]
+    fn every_jar_launch_is_headless_and_a_custom_setting_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("server.jar"), b"jar").unwrap();
+
+        let default_plan = plan(
+            &instance(LaunchKind::Jar, "server.jar", dir.path()),
+            Path::new("/opt/java/bin/java"),
+        )
+        .unwrap();
+        assert_eq!(
+            default_plan
+                .args
+                .iter()
+                .filter(|arg| arg.starts_with("-Djava.awt.headless"))
+                .count(),
+            1
+        );
+
+        // Somebody who set it themselves — to anything — keeps their value.
+        let mut chosen = instance(LaunchKind::Jar, "server.jar", dir.path());
+        chosen.jvm_args = r#"["-Djava.awt.headless=false"]"#.into();
+        let chosen_plan = plan(&chosen, Path::new("/opt/java/bin/java")).unwrap();
+        let headless: Vec<&String> = chosen_plan
+            .args
+            .iter()
+            .filter(|arg| arg.starts_with("-Djava.awt.headless"))
+            .collect();
+        assert_eq!(
+            headless,
+            vec!["-Djava.awt.headless=false"],
+            "{:?}",
+            chosen_plan.args
+        );
     }
 }

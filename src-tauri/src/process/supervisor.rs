@@ -201,12 +201,18 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         if let Some(requested_mb) = heap_mb {
             check_heap(state, &resolved, requested_mb).await?;
         }
+        check_java_version(
+            instance,
+            &resolved,
+            java::required_for(instance.java_major, &instance.mc_version),
+        )
+        .await?;
         return Ok(resolved);
     }
 
-    let required = instance
-        .java_major
-        .unwrap_or_else(|| java::required_java_for(&instance.mc_version));
+    // The recorded number and the version table, whichever is higher: a stale
+    // row must not be able to lower the requirement.
+    let required = java::required_for(instance.java_major, &instance.mc_version);
 
     if let Some(pinned) = &instance.java_path {
         let path = PathBuf::from(pinned);
@@ -219,6 +225,9 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
                 "pinned for this server",
             )
             .await;
+            // A pin is a preference, not a licence to run a server on a JVM it
+            // cannot load. Checked like any other choice.
+            check_java_version(instance, &path, required).await?;
             check_heap_fits(state, instance, &path).await?;
             return Ok(path);
         }
@@ -238,6 +247,7 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
             "chosen automatically",
         )
         .await;
+        check_java_version(instance, &path, required).await?;
         check_heap_fits(state, instance, &path).await?;
         return Ok(path);
     }
@@ -257,6 +267,34 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
             mc_version: instance.mc_version.clone(),
         },
         None => AppError::JavaNotFound { required },
+    })
+}
+
+/// Asks the resolved binary what version it is, and refuses if it is too old.
+///
+/// The database is not trusted for this: a row can be stale, or wrong, and the
+/// consequence is a server that starts and then dies with
+/// `UnsupportedClassVersionError` several seconds later — a message that names
+/// class file numbers rather than Java versions.
+async fn check_java_version(
+    instance: &Instance,
+    java: &Path,
+    required: i64,
+) -> AppResult<()> {
+    let Some(found) = java::probe_major(java).await else {
+        // Unreadable is not proof of anything; the launch carries on and the
+        // console will say what happened.
+        tracing::warn!(java = %java.display(), "could not read the Java version before launch");
+        return Ok(());
+    };
+
+    if java::satisfies(found, required) {
+        return Ok(());
+    }
+    Err(AppError::JavaTooOld {
+        required,
+        found,
+        mc_version: instance.mc_version.clone(),
     })
 }
 
@@ -305,9 +343,11 @@ async fn report_choice(
     how: &str,
 ) {
     let bits = java::bits_of(&state.db, java).await;
+    let major = java::probe_major(java).await;
     tracing::info!(
         instance = %instance.name,
         java = %java.display(),
+        java_major = major.map(|m| m.to_string()).unwrap_or_else(|| "unknown".into()),
         bits = bits.map(|b| b.to_string()).unwrap_or_else(|| "unknown".into()),
         heap_mb = heap_mb.unwrap_or(0),
         selection = how,
@@ -317,8 +357,12 @@ async fn report_choice(
 
     if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
         buffer.push_system(&format!(
-            "Java: {} ({}, {how}){}",
+            "Java: {} ({}, {}, {how}){}",
             java.display(),
+            match major {
+                Some(major) => format!("version {major}"),
+                None => "version unknown".to_string(),
+            },
             match bits {
                 Some(bits) => format!("{bits}-bit"),
                 None => "width unknown".to_string(),
@@ -576,6 +620,29 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
         LogEvent::PortInUse { detail } => {
             let _ = record_event(&state.db, instance.id, "error", Some(&detail)).await;
         }
+        LogEvent::ClassVersion {
+            needs,
+            found,
+            class_name,
+        } => {
+            // The JVM says this in class file numbers; the user gets Java
+            // versions and the name of the runtime that was actually used.
+            let message = format!(
+                "This server needs Java {needs} or newer, but it ran on Java {found}. \
+                 Install Java {needs} and pick it in this server's Settings tab."
+            );
+            tracing::warn!(
+                instance = %instance.name,
+                needs,
+                found,
+                class = class_name.as_deref().unwrap_or("-"),
+                "server refused its own class files"
+            );
+            if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
+                buffer.push_system(&message);
+            }
+            let _ = record_event(&state.db, instance.id, "error", Some(&message)).await;
+        }
         LogEvent::Crash { detail } => {
             let _ = record_event(&state.db, instance.id, "crashed", Some(&detail)).await;
         }
@@ -668,11 +735,7 @@ fn spawn_monitor(
             });
         }
 
-        let status_now = if crashed {
-            InstanceStatus::Crashed
-        } else {
-            InstanceStatus::Stopped
-        };
+        let status_now = backoff::status_for(exit);
         state.set_status(&instance.uuid, status_now);
         events::instance_status(&app, &instance.uuid, status_now, code.map(i64::from));
         events::instances_changed(&app);
@@ -1381,5 +1444,71 @@ mod tests {
 
         // A script asking for a heap the 32-bit JVM can hold still runs.
         assert!(check_heap(&state, Path::new(java), 1024).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_java_too_old_for_the_server_is_refused_before_spawning() {
+        // The real shape: a 26.2 server and the Java 17 that was chosen for it.
+        let dir = tempfile::tempdir().unwrap();
+        let instance_dir = dir.path().join("survival");
+        std::fs::create_dir_all(&instance_dir).unwrap();
+
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, dir.path().to_path_buf());
+        let now = now_rfc3339();
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, min_ram_mb, max_ram_mb, created_at, updated_at)
+             VALUES ('u1', 'idk', ?, 'fabric', '26.2', 'jar', '[]', '[]', 1024, 4096, ?, ?)",
+        )
+        .bind(instance_dir.to_string_lossy().to_string())
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+        let instance = instance::get(&state.db, 1).await.unwrap();
+
+        // A real Java on this machine, whatever it is, checked against a
+        // requirement nothing can satisfy.
+        let Some(java) = crate::java::detect::java_on_path() else {
+            return;
+        };
+        let err = check_java_version(&instance, &java, 999)
+            .await
+            .expect_err("no JVM is version 999");
+        assert_eq!(err.kind(), "java_too_old");
+        let message = err.user_message();
+        assert!(message.contains("26.2"), "{message}");
+        assert!(message.contains("999"), "{message}");
+
+        // And the same binary passes a requirement it does satisfy.
+        assert!(check_java_version(&instance, &java, 8).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_java_does_not_block_the_launch_on_a_guess() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, dir.path().to_path_buf());
+        let now = now_rfc3339();
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, created_at, updated_at)
+             VALUES ('u1', 'idk', 'Z:/idk', 'fabric', '26.2', 'jar', '[]', '[]', ?, ?)",
+        )
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+        let instance = instance::get(&state.db, 1).await.unwrap();
+
+        assert!(
+            check_java_version(&instance, Path::new("/nowhere/bin/java"), 25)
+                .await
+                .is_ok(),
+            "an unanswerable probe is not proof of anything"
+        );
     }
 }

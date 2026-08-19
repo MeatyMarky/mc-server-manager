@@ -102,6 +102,29 @@ runtime's version. `db::integrity_problems` runs `PRAGMA quick_check` at startup
 are logged at error level, go into the problem report, and the one disposable table
 (`java_runtimes`) is rebuilt from scratch.
 
+### The required Java version is a floor, and the chosen binary is asked directly
+`java::required_for(recorded, mc_version)` takes the higher of the number recorded at
+install time and the version table's answer. Mojang's metadata may raise the requirement —
+it knows about a new one before the table does — but it may never lower it: a row saying
+Java 8 for a 26.2 server let a Java 17 runtime be chosen, and the server died with
+`UnsupportedClassVersionError` seconds later. (The wrong row came from computing the
+requirement off the artifact's *build* string, a Fabric loader version, rather than the
+Minecraft version.)
+
+Preflight then asks the resolved binary what it is (`java::probe_major`) instead of trusting
+the cached row, and refuses when it is too old — including a pinned one. A pin is a
+preference, not permission to run a server on a JVM that cannot load it.
+
+### Servers never open windows
+Every jar launch carries `-Djava.awt.headless=true` unless the user set the property
+themselves. Without it Fabric's launcher reports its errors in a Swing dialog, which from a
+manager means a stray window holding the message this app should be showing.
+
+### Class file versions are translated before anyone sees them
+`UnsupportedClassVersionError` talks in class file numbers ("69.0 … up to 61.0"), which
+nobody thinks in. `logparse::parse_class_version_error` converts both (feature version =
+class version − 44) into "this server needs Java 25 … ran on Java 17".
+
 ### A 32-bit JVM is never chosen, and never launched with a big heap
 `java -version` prints "64-Bit Server VM" for a 64-bit build; the absence of that
 marker means 32-bit, and `java_runtimes.bits` records which. 32-bit runtimes are excluded

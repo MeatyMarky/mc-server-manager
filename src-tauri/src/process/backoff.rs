@@ -86,6 +86,19 @@ pub fn decide(
     }
 }
 
+/// The status an instance takes when its process ends.
+///
+/// A start that never finished leaves the same badge as a crash — the server is
+/// not running and something went wrong — and never leaves "Starting" on screen
+/// after the process is gone.
+pub fn status_for(exit: Exit) -> crate::db::models::InstanceStatus {
+    use crate::db::models::InstanceStatus;
+    match exit {
+        Exit::Requested => InstanceStatus::Stopped,
+        Exit::FailedStart | Exit::Crash => InstanceStatus::Crashed,
+    }
+}
+
 /// A non-zero exit, or a zero exit that the user did not ask for, counts as a
 /// crash. A server stopped through the UI exits 0 *and* was requested.
 pub fn is_crash(exit_code: Option<i32>, stop_requested: bool) -> bool {
@@ -244,5 +257,21 @@ mod tests {
                 attempt: 2
             }
         );
+    }
+
+    #[test]
+    fn a_failed_start_leaves_the_same_badge_as_a_crash_never_starting() {
+        use crate::db::models::InstanceStatus;
+
+        assert_eq!(status_for(Exit::FailedStart), InstanceStatus::Crashed);
+        assert_eq!(status_for(Exit::Crash), InstanceStatus::Crashed);
+        assert_eq!(status_for(Exit::Requested), InstanceStatus::Stopped);
+
+        // Whatever happens, the process is gone, so no outcome may leave the
+        // instance looking like it is still coming up.
+        for exit in [Exit::Requested, Exit::FailedStart, Exit::Crash] {
+            assert_ne!(status_for(exit), InstanceStatus::Starting);
+            assert_ne!(status_for(exit), InstanceStatus::Running);
+        }
     }
 }

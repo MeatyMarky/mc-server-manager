@@ -96,6 +96,19 @@ pub async fn best_for(pool: &SqlitePool, required: i64) -> AppResult<Option<Java
     Ok(runtimes.into_iter().next())
 }
 
+/// The feature version of the runtime at `path`, asked of the binary itself.
+///
+/// The cache is not consulted: a row can be stale, can predate an upgrade in
+/// place, or — as happened here — can be wrong outright, and the whole point of
+/// this call is to know what will really run a moment before it runs.
+pub async fn probe_major(path: &std::path::Path) -> Option<i64> {
+    let binary = path.to_path_buf();
+    tokio::task::spawn_blocking(move || detect::probe(&binary, JavaSource::Manual))
+        .await
+        .ok()
+        .and_then(|probe| probe.major)
+}
+
 /// The bitness of the runtime at `path`, from the cache or by asking it.
 ///
 /// A pinned path may never have been through detection, and preflight still has
@@ -117,6 +130,19 @@ pub async fn bits_of(pool: &SqlitePool, path: &std::path::Path) -> Option<i64> {
         .await
         .ok()
         .and_then(|probe| probe.bits)
+}
+
+/// What this instance really needs, taking the recorded number and the version
+/// table as a floor apiece.
+///
+/// The per-version JSON at install time is authoritative when it is *higher*:
+/// Mojang knows about a requirement the table has not learned yet. It is not
+/// authoritative when it is lower, because a wrong or stale row then silently
+/// downgrades the requirement — a recorded 8 against a 26.2 server let Java 17
+/// be chosen and the server refused its own class files.
+pub fn required_for(recorded: Option<i64>, mc_version: &str) -> i64 {
+    let from_table = required_java_for(mc_version);
+    recorded.unwrap_or(from_table).max(from_table)
 }
 
 /// The setting holding when detection last ran.
@@ -463,5 +489,31 @@ mod tests {
         // Second-resolution stamps can tie with the first scan of this test, so
         // the check is that the cache is current again, not that the text moved.
         assert!(!scan_is_stale(Some(&after), chrono::Utc::now()));
+    }
+
+    #[test]
+    fn a_recorded_requirement_can_raise_the_table_but_never_lower_it() {
+        // The bug this exists for: a 26.2 install recorded java_major = 8,
+        // which let a Java 17 runtime be chosen for a server built for 25.
+        assert_eq!(required_for(Some(8), "26.2"), 25);
+        assert_eq!(required_for(None, "26.2"), 25);
+
+        // Mojang knowing better than the table is exactly why the record exists.
+        assert_eq!(required_for(Some(26), "26.2"), 26);
+        assert_eq!(required_for(Some(21), "1.20.6"), 21);
+
+        // Old versions keep their low requirement.
+        assert_eq!(required_for(Some(8), "1.16.5"), 8);
+        assert_eq!(required_for(None, "1.16.5"), 8);
+        assert_eq!(required_for(Some(17), "1.16.5"), 17, "a pinned newer record wins");
+    }
+
+    #[tokio::test]
+    async fn the_version_a_binary_reports_is_read_from_the_binary() {
+        // A path that is not a JVM answers nothing rather than guessing.
+        assert_eq!(
+            probe_major(std::path::Path::new("/nowhere/bin/java")).await,
+            None
+        );
     }
 }

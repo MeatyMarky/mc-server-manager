@@ -179,7 +179,7 @@ where
 
     report(Phase::Install, 0, None, "Installing".to_string());
     let outcome = match artifact.kind {
-        ArtifactKind::ServerJar => install_jar(&dir, &cached, &artifact).await?,
+        ArtifactKind::ServerJar => install_jar(&dir, &cached, &artifact, mc_version).await?,
         ArtifactKind::Installer => {
             run_installer(state, instance, &dir, &cached, &artifact, cancel).await?
         }
@@ -237,7 +237,12 @@ pub async fn apply_outcome(
     super::crud::write_manifest(&instance).await
 }
 
-async fn install_jar(dir: &Path, cached: &Path, artifact: &Artifact) -> AppResult<InstallOutcome> {
+async fn install_jar(
+    dir: &Path,
+    cached: &Path,
+    artifact: &Artifact,
+    mc_version: &str,
+) -> AppResult<InstallOutcome> {
     let target = dir.join(&artifact.file_name);
     tokio::fs::copy(cached, &target)
         .await
@@ -247,9 +252,13 @@ async fn install_jar(dir: &Path, cached: &Path, artifact: &Artifact) -> AppResul
         launch_kind: LaunchKind::Jar,
         launch_target: Some(artifact.file_name.clone()),
         build: artifact.build.clone(),
-        java_major: artifact.java_major.unwrap_or_else(|| {
-            java::required_java_for(artifact.build.as_deref().unwrap_or_default())
-        }),
+        // The fallback is the Minecraft version, not the build: a Fabric
+        // artifact's `build` is its loader version ("0.19.3"), and asking what
+        // Java that needs answered 8 — which is how a 26.2 server came to be
+        // launched on Java 17.
+        java_major: artifact
+            .java_major
+            .unwrap_or_else(|| java::required_java_for(mc_version)),
         artifact_url: artifact.url.clone(),
     })
 }

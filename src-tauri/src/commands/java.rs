@@ -51,10 +51,10 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
     let instance = instance::get(&state.db, id).await?;
     let last_scan_at = java::last_scan_at(&state.db).await?;
     let scan_is_stale = java::scan_is_stale(last_scan_at.as_deref(), chrono::Utc::now());
-    // Mojang's own metadata, recorded at install time, beats the fallback table.
-    let required = instance
-        .java_major
-        .unwrap_or_else(|| java::required_java_for(&instance.mc_version));
+    // Mojang's own metadata, recorded at install time, raises the table's
+    // answer but never lowers it — a stale or wrong record would otherwise let
+    // a server be run on a JVM that cannot load its class files.
+    let required = java::required_for(instance.java_major, &instance.mc_version);
 
     if let Some(pinned) = instance.java_path.clone() {
         let known = java::list(&state.db)
