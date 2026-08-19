@@ -72,6 +72,11 @@ pub async fn pruner_loop(pool: SqlitePool) {
         if let Err(err) = prune(&pool, Utc::now()).await {
             tracing::warn!(error = %err, "resource sample prune failed");
         }
+        // A day of samples is thousands of rows; deleting them frees pages that
+        // would otherwise sit in the file until it is rebuilt.
+        if let Err(err) = crate::db::reclaim_free_pages(&pool).await {
+            tracing::warn!(error = %err, "could not return free pages to the disk");
+        }
         tokio::time::sleep(PRUNE_INTERVAL).await;
     }
 }

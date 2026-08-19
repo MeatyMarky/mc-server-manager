@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { FolderOpen } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FolderOpen, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ipc } from "@/lib/ipc";
+import type { HealthStatus } from "@/lib/types";
 
 /**
  * Version, commit, and where the app keeps things.
@@ -31,6 +32,13 @@ export function AboutDialog({
   const info = useQuery({
     queryKey: ["build-info"],
     queryFn: () => ipc.buildInfo(),
+    enabled: open,
+  });
+
+  // The self-check: one place to see whether this install is healthy.
+  const health = useQuery({
+    queryKey: ["health"],
+    queryFn: () => ipc.healthCheck(),
     enabled: open,
   });
 
@@ -77,6 +85,30 @@ export function AboutDialog({
           </dl>
         ) : null}
 
+        {health.data ? (
+          <section className="grid gap-1.5" aria-label="Self-check">
+            <h3 className="flex items-center gap-2 text-sm font-medium">
+              <StatusIcon status={health.data.status} />
+              {health.data.status === "ok"
+                ? "Everything checks out"
+                : health.data.status === "warn"
+                  ? "Working, with something worth knowing"
+                  : "Something is wrong"}
+            </h3>
+            <ul className="grid gap-1 text-xs">
+              {health.data.checks.map((check) => (
+                <li key={check.name} className="flex items-start gap-2">
+                  <StatusIcon status={check.status} />
+                  <span className="min-w-0">
+                    <span className="font-medium">{check.name}: </span>
+                    <span className="text-muted-foreground">{check.detail}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         <DialogFooter>
           <Button variant="outline" onClick={onReportProblem}>
             Report a problem
@@ -118,5 +150,37 @@ function Row({
         ) : null}
       </dd>
     </div>
+  );
+}
+
+/**
+ * The state of one check. Colour is doubled by the icon shape and the label
+ * that follows it, so it never carries the meaning on its own.
+ */
+function StatusIcon({ status }: { status: HealthStatus }) {
+  if (status === "ok") {
+    return (
+      <>
+        <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-500" aria-hidden />
+        <span className="sr-only">Passed: </span>
+      </>
+    );
+  }
+  if (status === "warn") {
+    return (
+      <>
+        <AlertTriangle
+          className="mt-0.5 size-3.5 shrink-0 text-[var(--status-starting)]"
+          aria-hidden
+        />
+        <span className="sr-only">Warning: </span>
+      </>
+    );
+  }
+  return (
+    <>
+      <XCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-hidden />
+      <span className="sr-only">Failed: </span>
+    </>
   );
 }

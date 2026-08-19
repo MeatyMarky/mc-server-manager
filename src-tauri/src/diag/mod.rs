@@ -177,6 +177,213 @@ pub async fn readiness(state: &AppState) -> AppResult<Readiness> {
     })
 }
 
+/// One thing that was checked, and what it found.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct HealthCheck {
+    /// Short label, e.g. "Database integrity".
+    pub name: String,
+    pub status: HealthStatus,
+    /// One line saying what was found, whether it passed or not.
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum HealthStatus {
+    Ok,
+    /// Working, but worth knowing about.
+    Warn,
+    /// Something is broken and will be noticed sooner or later.
+    Fail,
+}
+
+/// Everything the self-check looked at.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct Health {
+    pub checks: Vec<HealthCheck>,
+    /// The worst status among the checks, so the UI has one thing to show.
+    pub status: HealthStatus,
+    pub checked_at: String,
+}
+
+/// Runs the whole self-check.
+///
+/// Everything here is a question somebody ends up asking when the app behaves
+/// oddly: is the schema current, is the file sound, is the Java this app
+/// downloaded still there and still runnable, are the server folders where they
+/// were left. One place to look, and it travels in the problem report.
+pub async fn health(state: &AppState) -> Health {
+    let mut checks = Vec::new();
+
+    // Schema and migrations.
+    let applied: Vec<(i64, String, bool)> = sqlx::query_as(
+        "SELECT version, description, success FROM _sqlx_migrations ORDER BY version",
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let failed: Vec<String> = applied
+        .iter()
+        .filter(|(_, _, success)| !success)
+        .map(|(version, description, _)| format!("{version} {description}"))
+        .collect();
+
+    checks.push(match (applied.last(), failed.is_empty()) {
+        (Some((version, _, _)), true) => HealthCheck {
+            name: "Schema".into(),
+            status: HealthStatus::Ok,
+            detail: format!("version {version}, {} migrations applied", applied.len()),
+        },
+        (_, false) => HealthCheck {
+            name: "Schema".into(),
+            status: HealthStatus::Fail,
+            detail: format!("migrations that did not finish: {}", failed.join(", ")),
+        },
+        (None, _) => HealthCheck {
+            name: "Schema".into(),
+            status: HealthStatus::Fail,
+            detail: "no migrations are recorded at all".into(),
+        },
+    });
+
+    // The file itself.
+    checks.push(match crate::db::integrity_problems(&state.db).await {
+        Ok(problems) if problems.is_empty() => {
+            let free = crate::db::free_pages(&state.db).await.unwrap_or(0);
+            HealthCheck {
+                name: "Database integrity".into(),
+                status: HealthStatus::Ok,
+                detail: format!(
+                    "sound, {} free page(s), auto-vacuum {}",
+                    free,
+                    match crate::db::auto_vacuum_mode(&state.db).await {
+                        2 => "incremental",
+                        1 => "full",
+                        _ => "off",
+                    }
+                ),
+            }
+        }
+        Ok(problems) => HealthCheck {
+            name: "Database integrity".into(),
+            status: HealthStatus::Fail,
+            detail: format!("{} problem(s): {}", problems.len(), problems.join("; ")),
+        },
+        Err(err) => HealthCheck {
+            name: "Database integrity".into(),
+            status: HealthStatus::Warn,
+            detail: format!("could not be checked: {}", err.user_message()),
+        },
+    });
+
+    // Managed runtimes: present on disk, and still able to answer for themselves.
+    let managed = crate::java::managed::list(state).await.unwrap_or_default();
+    if managed.is_empty() {
+        checks.push(HealthCheck {
+            name: "Downloaded Java".into(),
+            status: HealthStatus::Ok,
+            detail: "none installed".into(),
+        });
+    } else {
+        let mut broken = Vec::new();
+        for runtime in &managed {
+            let path = std::path::Path::new(&runtime.java_path);
+            if !path.is_file() {
+                broken.push(format!("Java {} is missing from disk", runtime.feature_version));
+                continue;
+            }
+            match crate::java::probe_major(path).await {
+                Some(major) if crate::java::satisfies(major, runtime.feature_version) => {}
+                Some(major) => broken.push(format!(
+                    "Java {} reports version {major}",
+                    runtime.feature_version
+                )),
+                None => broken.push(format!(
+                    "Java {} did not answer -version",
+                    runtime.feature_version
+                )),
+            }
+        }
+
+        checks.push(if broken.is_empty() {
+            HealthCheck {
+                name: "Downloaded Java".into(),
+                status: HealthStatus::Ok,
+                detail: format!(
+                    "{} runtime(s), all runnable: {}",
+                    managed.len(),
+                    managed
+                        .iter()
+                        .map(|runtime| format!("Java {}", runtime.feature_version))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+        } else {
+            HealthCheck {
+                name: "Downloaded Java".into(),
+                status: HealthStatus::Fail,
+                detail: broken.join("; "),
+            }
+        });
+    }
+
+    // Instance folders. A missing one is recoverable, so it is a warning.
+    let instances: Vec<(String, String)> = sqlx::query_as("SELECT name, path FROM instances")
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+    let missing: Vec<String> = instances
+        .iter()
+        .filter(|(_, path)| !std::path::Path::new(path).is_dir())
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    checks.push(if instances.is_empty() {
+        HealthCheck {
+            name: "Server folders".into(),
+            status: HealthStatus::Ok,
+            detail: "no servers yet".into(),
+        }
+    } else if missing.is_empty() {
+        HealthCheck {
+            name: "Server folders".into(),
+            status: HealthStatus::Ok,
+            detail: format!("{} server(s), every folder reachable", instances.len()),
+        }
+    } else {
+        HealthCheck {
+            name: "Server folders".into(),
+            status: HealthStatus::Warn,
+            detail: format!(
+                "{} of {} not reachable: {} — use \"Locate folder…\" if they moved",
+                missing.len(),
+                instances.len(),
+                missing.join(", ")
+            ),
+        }
+    });
+
+    let status = if checks.iter().any(|check| check.status == HealthStatus::Fail) {
+        HealthStatus::Fail
+    } else if checks.iter().any(|check| check.status == HealthStatus::Warn) {
+        HealthStatus::Warn
+    } else {
+        HealthStatus::Ok
+    };
+
+    Health {
+        checks,
+        status,
+        checked_at: now_rfc3339(),
+    }
+}
+
 /// The newest rolled log file, which is the one that has today's run in it.
 pub fn newest_log(data_dir: &Path) -> Option<PathBuf> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(log_dir(data_dir))
@@ -241,6 +448,7 @@ pub async fn preview(
     let integrity = crate::db::integrity_problems(&state.db)
         .await
         .unwrap_or_else(|err| vec![format!("the check itself failed: {err}")]);
+    let health = health(state).await;
 
     parts.push(ReportPart {
         name: "about.txt".into(),
@@ -265,6 +473,28 @@ pub async fn preview(
             },
             now_rfc3339(),
         ),
+    });
+
+    parts.push(ReportPart {
+        name: "health.txt".into(),
+        purpose: "The self-check: schema, database, downloaded Java, server folders.".into(),
+        content: health
+            .checks
+            .iter()
+            .map(|check| {
+                format!(
+                    "[{}] {}: {}",
+                    match check.status {
+                        HealthStatus::Ok => "ok",
+                        HealthStatus::Warn => "warn",
+                        HealthStatus::Fail => "FAIL",
+                    },
+                    check.name,
+                    check.detail
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
     });
 
     let runtimes = crate::java::list(&state.db).await.unwrap_or_default();
@@ -480,6 +710,7 @@ mod tests {
             names,
             vec![
                 "about.txt",
+                "health.txt",
                 "java.txt",
                 "app.log",
                 "instance.txt",
@@ -489,15 +720,29 @@ mod tests {
         );
 
         // Every part carries its real text, so the dialog can show it.
-        let about = &preview.parts[0].content;
+        let by_name = |name: &str| {
+            preview
+                .parts
+                .iter()
+                .find(|part| part.name == name)
+                .unwrap_or_else(|| panic!("{name} is in the report"))
+        };
+
+        let about = &by_name("about.txt").content;
         assert!(about.contains(version()));
         let schema = schema_version(&state).await.expect("a migrated database");
         assert!(
             about.contains(&format!("schema version: {schema}")),
             "{about}"
         );
-        assert!(preview.parts[2].content.contains("something happened"));
-        assert!(preview.parts[3].content.contains("Survival"));
+        assert!(by_name("app.log").content.contains("something happened"));
+        assert!(by_name("instance.txt").content.contains("Survival"));
+        // The self-check travels with it: schema, database, Java, folders.
+        let health_text = &by_name("health.txt").content;
+        assert!(health_text.contains("Schema"), "{health_text}");
+        assert!(health_text.contains("Database integrity"), "{health_text}");
+        assert!(health_text.contains("Downloaded Java"), "{health_text}");
+        assert!(health_text.contains("Server folders"), "{health_text}");
         assert!(preview.parts.iter().all(|part| !part.purpose.is_empty()));
 
         // And the warning about what the paths give away is not optional.
@@ -625,5 +870,102 @@ mod tests {
         let ready = readiness(&state).await.unwrap();
         assert_eq!(ready.warning, None);
         assert_eq!(ready.newest_java, Some(25));
+    }
+
+    #[tokio::test]
+    async fn a_clean_install_passes_every_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            crate::db::connect_in_memory().await.unwrap(),
+            dir.path().to_path_buf(),
+        );
+
+        let health = health(&state).await;
+        assert_eq!(health.status, HealthStatus::Ok, "{:?}", health.checks);
+
+        let names: Vec<&str> = health.checks.iter().map(|check| check.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Schema", "Database integrity", "Downloaded Java", "Server folders"]
+        );
+
+        // Each one says what it found, not merely that it looked.
+        let schema = &health.checks[0];
+        assert!(schema.detail.contains("migrations applied"), "{}", schema.detail);
+        assert!(schema.detail.contains("version"), "{}", schema.detail);
+        assert!(health.checks.iter().all(|check| !check.detail.is_empty()));
+        assert!(!health.checked_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_folder_that_moved_is_a_warning_not_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_with_instance(dir.path()).await;
+
+        let health = health(&state).await;
+        // The instance's folder does not exist in this fixture.
+        let folders = health
+            .checks
+            .iter()
+            .find(|check| check.name == "Server folders")
+            .unwrap();
+        assert_eq!(folders.status, HealthStatus::Warn);
+        assert!(folders.detail.contains("Survival"), "{}", folders.detail);
+        assert!(folders.detail.contains("Locate folder"), "{}", folders.detail);
+
+        // A recoverable state must not make the whole install look broken.
+        assert_eq!(health.status, HealthStatus::Warn);
+    }
+
+    #[tokio::test]
+    async fn a_managed_runtime_that_vanished_fails_the_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new(
+            crate::db::connect_in_memory().await.unwrap(),
+            dir.path().to_path_buf(),
+        );
+
+        sqlx::query(
+            "INSERT INTO managed_runtimes
+                (feature_version, release_name, vendor, java_path, installed_at, size_bytes)
+             VALUES (25, 'jdk-25.0.4+7', 'Eclipse Temurin', 'Z:/gone/bin/java', ?, 1)",
+        )
+        .bind(now_rfc3339())
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let health = health(&state).await;
+        let java = health
+            .checks
+            .iter()
+            .find(|check| check.name == "Downloaded Java")
+            .unwrap();
+        assert_eq!(java.status, HealthStatus::Fail);
+        assert!(java.detail.contains("missing from disk"), "{}", java.detail);
+        assert_eq!(health.status, HealthStatus::Fail, "the worst status wins");
+    }
+
+    #[tokio::test]
+    async fn the_database_check_reports_how_space_is_managed() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        crate::db::enable_incremental_vacuum(&pool).await.unwrap();
+        let state = AppState::new(pool, dir.path().to_path_buf());
+
+        let health = health(&state).await;
+        let db_check = health
+            .checks
+            .iter()
+            .find(|check| check.name == "Database integrity")
+            .unwrap();
+
+        assert_eq!(db_check.status, HealthStatus::Ok);
+        assert!(db_check.detail.contains("sound"), "{}", db_check.detail);
+        assert!(
+            db_check.detail.contains("auto-vacuum incremental"),
+            "{}",
+            db_check.detail
+        );
     }
 }

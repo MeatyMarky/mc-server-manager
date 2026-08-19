@@ -95,6 +95,24 @@ A cached scan older than `CACHE_MAX_AGE_HOURS` (24) is redone at launch
 (`java::rescan_if_stale`), and Settings shows when the list was built. A JDK installed after
 the last scan is otherwise invisible while the picker looks complete.
 
+### The database gives space back, and the mode has to survive the pool
+Metrics land every few seconds and are pruned in bulk, so deletes free pages that a
+default SQLite file never returns. The connection options set
+`auto_vacuum = INCREMENTAL` — **sqlx's own default is `None`, which would push the file
+back to "never shrink" on the next VACUUM** — and the one-off rebuild that applies the mode
+to an existing file runs at startup on a single acquired connection, because the pragma and
+the `VACUUM` must be the same connection to take effect. `db::reclaim_free_pages` then runs
+`PRAGMA incremental_vacuum` after each retention prune. Reading `PRAGMA auto_vacuum` from a
+different pooled connection reports whatever the mode was when *that* connection opened, so
+the check reads it back on the connection that did the work.
+
+### A startup self-check answers the first round of questions
+`diag::health` reports schema version and migration count, `quick_check` plus free pages and
+the auto-vacuum mode, whether every managed runtime is present and still answers `-version`,
+and whether each instance folder is reachable. It runs at launch into the log, shows in the
+About dialog, and travels in the problem report as `health.txt`. A missing instance folder is
+a warning, not a failure — it is recoverable.
+
 ### A corrupt database looks like the app forgetting things
 A damaged index makes `COUNT(*)` disagree with a table scan and makes `ON CONFLICT` update
 the wrong row — which reads as instances vanishing and as runtimes carrying another

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use tauri::State;
 
-use crate::diag::{self, BuildInfo, ReportPreview};
+use crate::diag::{self, BuildInfo, Health, ReportPreview};
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -38,6 +38,12 @@ pub async fn report_write(
     let target = PathBuf::from(target);
     diag::write_zip(&preview, &target)?;
     Ok(target.to_string_lossy().to_string())
+}
+
+/// The startup self-check, as the About dialog shows it.
+#[tauri::command]
+pub async fn health_check(state: State<'_, AppState>) -> AppResult<Health> {
+    Ok(diag::health(&state).await)
 }
 
 /// Whether the machine can run a server at all, for the first-run screen.

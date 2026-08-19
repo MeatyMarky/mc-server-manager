@@ -118,3 +118,8 @@ export type { DownloadOffer } from "./bindings/DownloadOffer";
 export type { JavaPlan } from "./bindings/JavaPlan";
 export type { ManagedRuntime } from "./bindings/ManagedRuntime";
 export type { Origin as JavaOrigin } from "./bindings/Origin";
+
+// The startup self-check.
+export type { Health } from "./bindings/Health";
+export type { HealthCheck } from "./bindings/HealthCheck";
+export type { HealthStatus } from "./bindings/HealthStatus";

@@ -67,6 +67,14 @@ pub fn run() {
                 Err(err) => tracing::warn!(error = %err, "could not check the database"),
             }
 
+            // Before the collector, the scheduler or anything else writes: a
+            // VACUUM needs a quiet moment, and this is the only one there is.
+            match tauri::async_runtime::block_on(db::enable_incremental_vacuum(&pool)) {
+                Ok(true) => tracing::info!("database rebuilt for incremental auto-vacuum"),
+                Ok(false) => {}
+                Err(err) => tracing::warn!(error = %err, "could not set incremental auto-vacuum"),
+            }
+
             let state = AppState::new(pool.clone(), data_dir);
 
             // Orphan recovery has to happen before the UI paints, so the sidebar
@@ -107,6 +115,30 @@ pub fn run() {
             // Resource sampling and scheduled backups: exactly one task each.
             // The scheduler's first tick is what catches up anything that was
             // due while the app was closed.
+            // The self-check runs once at launch: whatever is wrong is in the
+            // log before the user notices the symptom.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Manager;
+                    let state = handle.state::<AppState>();
+                    let health = diag::health(&state).await;
+                    for check in &health.checks {
+                        match check.status {
+                            diag::HealthStatus::Ok => {
+                                tracing::info!(check = %check.name, detail = %check.detail, "self-check")
+                            }
+                            diag::HealthStatus::Warn => {
+                                tracing::warn!(check = %check.name, detail = %check.detail, "self-check")
+                            }
+                            diag::HealthStatus::Fail => {
+                                tracing::error!(check = %check.name, detail = %check.detail, "self-check")
+                            }
+                        }
+                    }
+                });
+            }
+
             tauri::async_runtime::spawn(metrics::collector::run(app.handle().clone()));
             tauri::async_runtime::spawn(backup::runner::run(app.handle().clone()));
             Ok(())
@@ -202,6 +234,7 @@ pub fn run() {
             commands::diag::report_preview,
             commands::diag::report_write,
             commands::diag::startup_readiness,
+            commands::diag::health_check,
             commands::runtimes::managed_runtimes_list,
             commands::runtimes::managed_runtimes_size,
             commands::runtimes::managed_runtime_delete,

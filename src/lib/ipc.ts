@@ -6,6 +6,7 @@ import type {
   AppErrorShape,
   AppInfo,
   BuildInfo,
+  Health,
   JavaPlan,
   ManagedRuntime,
   Readiness,
@@ -249,6 +250,8 @@ export const ipc = {
 
   // Phase 7: about, first run, problem reports.
   buildInfo: () => invoke<BuildInfo>("build_info"),
+  /** Schema, database, downloaded Java and server folders, in one answer. */
+  healthCheck: () => invoke<Health>("health_check"),
   startupReadiness: () => invoke<Readiness>("startup_readiness"),
   /** Everything the report would contain, so it can be read before it exists. */
   reportPreview: (id: number | null, lines?: number) =>
