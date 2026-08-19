@@ -17,6 +17,9 @@ pub struct JavaVersionInfo {
     pub vendor: Option<String>,
     /// True when the runtime is a JDK (server installers need one), false for a JRE.
     pub is_jdk: bool,
+    /// 64 or 32. A 32-bit JVM cannot address the heap a server wants and refuses
+    /// to start with `-Xmx8192M`, so this decides whether it is offered at all.
+    pub bits: i64,
 }
 
 /// Parses the three-line block `java -version` writes to **stderr**:
@@ -47,7 +50,32 @@ pub fn parse_java_version(output: &str) -> Option<JavaVersionInfo> {
         full: quoted.to_string(),
         vendor,
         is_jdk,
+        bits: bits_from_output(output),
     })
+}
+
+/// Heap size a 32-bit JVM can still be asked for, in MB.
+///
+/// The hard ceiling is a 4 GB address space minus everything else the process
+/// maps, which in practice lands somewhere between 1.4 and 1.6 GB on Windows.
+/// Past this the JVM refuses to start with "Invalid maximum heap size", so the
+/// app stops before spawning it rather than showing that in the console.
+pub const MAX_HEAP_32BIT_MB: i64 = 1500;
+
+/// 64 unless the VM line says otherwise.
+///
+/// Every 64-bit JVM prints "64-Bit Server VM" (or "64-Bit Client VM"); 32-bit
+/// builds print "Client VM" or "Server VM" with no width at all. The absence is
+/// the signal, so anything that does not say 64-bit is treated as 32-bit —
+/// wrongly excluding an exotic JVM is a smaller failure than launching one that
+/// cannot hold the heap.
+pub fn bits_from_output(output: &str) -> i64 {
+    let lowered = output.to_ascii_lowercase();
+    if lowered.contains("64-bit") || lowered.contains("64 bit") {
+        64
+    } else {
+        32
+    }
 }
 
 /// `"1.8.0_402"` -> 8, `"21.0.10"` -> 21, `"25-ea"` -> 25.
@@ -125,6 +153,17 @@ Java HotSpot(TM) 64-Bit Server VM (build 25.402-b06, mixed mode)"#;
 OpenJDK Runtime Environment (build 26.0.1+9-24)
 OpenJDK 64-Bit Server VM (build 26.0.1+9-24, mixed mode, sharing)"#;
 
+    /// The 32-bit Java 8 that ships into `Program Files (x86)`: no width in the
+    /// VM line at all. This is the runtime that produced "Invalid maximum heap
+    /// size: -Xmx8192M" after being picked automatically.
+    const ORACLE_8_X86: &str = r#"java version "1.8.0_451"
+Java(TM) SE Runtime Environment (build 1.8.0_451-b10)
+Java HotSpot(TM) Client VM (build 25.451-b10, mixed mode, sharing)"#;
+
+    const ZULU_17_X86: &str = r#"openjdk version "17.0.9" 2023-10-17 LTS
+OpenJDK Runtime Environment Zulu17.46+19-CA (build 17.0.9+8-LTS)
+OpenJDK Server VM Zulu17.46+19-CA (build 17.0.9+8-LTS, mixed mode)"#;
+
     #[test]
     fn parses_modern_output() {
         let info = parse_java_version(TEMURIN_21).unwrap();
@@ -132,6 +171,29 @@ OpenJDK 64-Bit Server VM (build 26.0.1+9-24, mixed mode, sharing)"#;
         assert_eq!(info.full, "21.0.10");
         assert_eq!(info.vendor.as_deref(), Some("Temurin"));
         assert!(info.is_jdk);
+    }
+
+    #[test]
+    fn bitness_comes_from_the_vm_line_and_its_absence_means_32() {
+        // Every 64-bit build says so; nothing else does.
+        assert_eq!(parse_java_version(TEMURIN_21).unwrap().bits, 64);
+        assert_eq!(parse_java_version(ORACLE_8).unwrap().bits, 64);
+        assert_eq!(parse_java_version(OPENJDK_26).unwrap().bits, 64);
+
+        // A 32-bit JVM prints "Client VM" or "Server VM" with no width.
+        assert_eq!(parse_java_version(ORACLE_8_X86).unwrap().bits, 32);
+        assert_eq!(parse_java_version(ZULU_17_X86).unwrap().bits, 32);
+    }
+
+    #[test]
+    fn the_bitness_marker_is_matched_whatever_the_casing() {
+        assert_eq!(bits_from_output("OpenJDK 64-Bit Server VM"), 64);
+        assert_eq!(bits_from_output("openjdk 64-bit server vm"), 64);
+        // Some builds space it out.
+        assert_eq!(bits_from_output("Java HotSpot(TM) 64 Bit Server VM"), 64);
+
+        assert_eq!(bits_from_output("Java HotSpot(TM) Client VM"), 32);
+        assert_eq!(bits_from_output(""), 32, "unknown is treated as 32-bit");
     }
 
     #[test]

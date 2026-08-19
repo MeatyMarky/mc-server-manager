@@ -44,14 +44,39 @@ pub struct JavaRuntime {
     pub full_version: Option<String>,
     pub vendor: Option<String>,
     pub arch: Option<String>,
+    /// 64 or 32, as the JVM reported it. `None` only for rows detected by a
+    /// build that predates this column; those are re-probed on the next scan.
+    #[ts(type = "number | null")]
+    pub bits: Option<i64>,
     pub source: JavaSource,
     pub valid: bool,
     pub detected_at: String,
 }
 
+impl JavaRuntime {
+    /// Whether this runtime may be chosen automatically.
+    ///
+    /// A 32-bit JVM tops out around 1.5 GB of heap and refuses to start with the
+    /// `-Xmx` a server is normally given, so it is never picked on its own. It
+    /// stays in the list — a user who deliberately pins one gets a warning, not
+    /// a disappearance.
+    pub fn usable_for_servers(&self) -> bool {
+        self.valid && self.bits == Some(64)
+    }
+
+    /// Why this runtime is not offered, for the UI to show next to it.
+    pub fn unsuitable_reason(&self) -> Option<&'static str> {
+        match self.bits {
+            Some(64) => None,
+            Some(_) => Some("32-bit, not suitable for servers"),
+            None => Some("width unknown until the next scan"),
+        }
+    }
+}
+
 pub async fn list(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
     let rows = sqlx::query_as::<_, JavaRuntime>(
-        "SELECT id, path, major, full_version, vendor, arch, source, valid, detected_at
+        "SELECT id, path, major, full_version, vendor, arch, bits, source, valid, detected_at
          FROM java_runtimes WHERE valid = 1 ORDER BY major DESC, path",
     )
     .fetch_all(pool)
@@ -63,15 +88,42 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
 /// satisfies the requirement, so a 1.16 server does not get Java 26.
 pub async fn best_for(pool: &SqlitePool, required: i64) -> AppResult<Option<JavaRuntime>> {
     let mut runtimes = list(pool).await?;
-    runtimes.retain(|r| satisfies(r.major, required));
+    // 32-bit runtimes are excluded here rather than at launch: picking one
+    // automatically produces "Invalid maximum heap size" from the JVM, which
+    // tells the user nothing about which Java was used or why.
+    runtimes.retain(|r| satisfies(r.major, required) && r.usable_for_servers());
     runtimes.sort_by_key(|r| r.major);
     Ok(runtimes.into_iter().next())
+}
+
+/// The bitness of the runtime at `path`, from the cache or by asking it.
+///
+/// A pinned path may never have been through detection, and preflight still has
+/// to know before it spawns anything.
+pub async fn bits_of(pool: &SqlitePool, path: &std::path::Path) -> Option<i64> {
+    let text = path.to_string_lossy().to_string();
+    if let Ok(Some(bits)) =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT bits FROM java_runtimes WHERE path = ?")
+            .bind(&text)
+            .fetch_optional(pool)
+            .await
+            .map(|row| row.flatten())
+    {
+        return Some(bits);
+    }
+
+    let binary = path.to_path_buf();
+    tokio::task::spawn_blocking(move || detect::probe(&binary, JavaSource::Manual))
+        .await
+        .ok()
+        .and_then(|probe| probe.bits)
 }
 
 /// Runs detection and replaces the cache. Returns everything now known.
 pub async fn rescan(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
     let cached = sqlx::query_as::<_, detect::CachedProbe>(
-        "SELECT path, mtime, size_bytes, major, full_version, vendor, arch, valid FROM java_runtimes",
+        "SELECT path, mtime, size_bytes, major, full_version, vendor, arch, bits, valid
+         FROM java_runtimes",
     )
     .fetch_all(pool)
     .await?;
@@ -84,18 +136,21 @@ pub async fn rescan(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
     for probe in &probes {
         sqlx::query(
             "INSERT INTO java_runtimes
-                (path, major, vendor, arch, source, valid, detected_at, mtime, size_bytes, full_version, error)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (path, major, vendor, arch, bits, source, valid, detected_at, mtime, size_bytes,
+                 full_version, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(path) DO UPDATE SET
                 major = excluded.major, vendor = excluded.vendor, arch = excluded.arch,
-                source = excluded.source, valid = excluded.valid, detected_at = excluded.detected_at,
-                mtime = excluded.mtime, size_bytes = excluded.size_bytes,
-                full_version = excluded.full_version, error = excluded.error",
+                bits = excluded.bits, source = excluded.source, valid = excluded.valid,
+                detected_at = excluded.detected_at, mtime = excluded.mtime,
+                size_bytes = excluded.size_bytes, full_version = excluded.full_version,
+                error = excluded.error",
         )
         .bind(&probe.path)
         .bind(probe.major.unwrap_or(0))
         .bind(&probe.vendor)
         .bind(&probe.arch)
+        .bind(probe.bits)
         .bind(probe.source)
         .bind(probe.major.is_some())
         .bind(&now)
@@ -156,18 +211,20 @@ pub async fn add_manual(pool: &SqlitePool, path: &str) -> AppResult<JavaRuntime>
     let now = now_rfc3339();
     sqlx::query(
         "INSERT INTO java_runtimes
-            (path, major, vendor, arch, source, valid, detected_at, mtime, size_bytes, full_version, error)
-         VALUES (?, ?, ?, ?, 'manual', 1, ?, ?, ?, ?, NULL)
+            (path, major, vendor, arch, bits, source, valid, detected_at, mtime, size_bytes,
+             full_version, error)
+         VALUES (?, ?, ?, ?, ?, 'manual', 1, ?, ?, ?, ?, NULL)
          ON CONFLICT(path) DO UPDATE SET
             major = excluded.major, vendor = excluded.vendor, arch = excluded.arch,
-            source = 'manual', valid = 1, detected_at = excluded.detected_at,
-            mtime = excluded.mtime, size_bytes = excluded.size_bytes,
-            full_version = excluded.full_version, error = NULL",
+            bits = excluded.bits, source = 'manual', valid = 1,
+            detected_at = excluded.detected_at, mtime = excluded.mtime,
+            size_bytes = excluded.size_bytes, full_version = excluded.full_version, error = NULL",
     )
     .bind(&probe.path)
     .bind(major)
     .bind(&probe.vendor)
     .bind(&probe.arch)
+    .bind(probe.bits)
     .bind(&now)
     .bind(probe.mtime)
     .bind(probe.size_bytes)
@@ -176,7 +233,7 @@ pub async fn add_manual(pool: &SqlitePool, path: &str) -> AppResult<JavaRuntime>
     .await?;
 
     sqlx::query_as::<_, JavaRuntime>(
-        "SELECT id, path, major, full_version, vendor, arch, source, valid, detected_at
+        "SELECT id, path, major, full_version, vendor, arch, bits, source, valid, detected_at
          FROM java_runtimes WHERE path = ?",
     )
     .bind(&probe.path)
@@ -190,12 +247,17 @@ mod tests {
     use super::*;
 
     async fn seed(pool: &SqlitePool, path: &str, major: i64) {
+        seed_bits(pool, path, major, Some(64)).await;
+    }
+
+    async fn seed_bits(pool: &SqlitePool, path: &str, major: i64, bits: Option<i64>) {
         sqlx::query(
-            "INSERT INTO java_runtimes (path, major, source, valid, detected_at)
-             VALUES (?, ?, 'common_dir', 1, ?)",
+            "INSERT INTO java_runtimes (path, major, bits, source, valid, detected_at)
+             VALUES (?, ?, ?, 'common_dir', 1, ?)",
         )
         .bind(path)
         .bind(major)
+        .bind(bits)
         .bind(now_rfc3339())
         .execute(pool)
         .await
@@ -221,6 +283,64 @@ mod tests {
         let pool = crate::db::connect_in_memory().await.unwrap();
         seed(&pool, "/jdk8/bin/java", 8).await;
         assert!(best_for(&pool, 21).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_32_bit_runtime_is_never_chosen_automatically() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        // The shape this machine actually has: Program Files (x86) Java 8.
+        seed_bits(&pool, "C:/Program Files (x86)/Java/jre1.8.0_451/bin/java.exe", 8, Some(32)).await;
+
+        assert!(
+            best_for(&pool, 8).await.unwrap().is_none(),
+            "a 32-bit JVM cannot hold a server heap, so it is not a candidate"
+        );
+
+        // It stays visible, with a reason, rather than vanishing from the list.
+        let listed = list(&pool).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].usable_for_servers());
+        assert_eq!(
+            listed[0].unsuitable_reason(),
+            Some("32-bit, not suitable for servers")
+        );
+
+        // A 64-bit runtime of the same version is picked instead.
+        seed_bits(&pool, "C:/Program Files/Java/jdk-8/bin/java.exe", 8, Some(64)).await;
+        let chosen = best_for(&pool, 8).await.unwrap().expect("the 64-bit one");
+        assert!(chosen.path.contains("Program Files/Java"));
+        assert!(!chosen.path.contains("(x86)"));
+    }
+
+    #[tokio::test]
+    async fn a_runtime_of_unknown_width_is_not_chosen_either() {
+        // Rows written before bitness was recorded. Assuming 64-bit is exactly
+        // the assumption that produced "Invalid maximum heap size".
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        seed_bits(&pool, "/jdk21/bin/java", 21, None).await;
+
+        assert!(best_for(&pool, 21).await.unwrap().is_none());
+        assert_eq!(
+            list(&pool).await.unwrap()[0].unsuitable_reason(),
+            Some("width unknown until the next scan")
+        );
+    }
+
+    #[tokio::test]
+    async fn bits_of_reads_the_cache_before_probing_anything() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        seed_bits(&pool, "/jdk21/bin/java", 21, Some(32)).await;
+
+        assert_eq!(
+            bits_of(&pool, std::path::Path::new("/jdk21/bin/java")).await,
+            Some(32)
+        );
+        // An unknown path with no binary behind it answers nothing rather than
+        // guessing, and preflight treats that as "not proven 32-bit".
+        assert_eq!(
+            bits_of(&pool, std::path::Path::new("/nowhere/bin/java")).await,
+            None
+        );
     }
 
     #[tokio::test]

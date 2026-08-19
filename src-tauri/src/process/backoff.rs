@@ -12,6 +12,21 @@ pub const BASE_DELAY_SECS: u64 = 5;
 /// No single wait grows past this.
 pub const MAX_DELAY_SECS: u64 = 300;
 
+/// How a server process ended, which decides whether restarting it could help.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exit {
+    /// The user asked for it.
+    Requested,
+    /// The process ended before the server ever reported being ready.
+    ///
+    /// Nothing about waiting changes a bad `-Xmx`, a missing jar or a port that
+    /// is taken, so this must not be retried: the first attempt already carries
+    /// the whole answer, and four more only bury it in the console.
+    FailedStart,
+    /// The server was running, then died. This is what backoff exists for.
+    Crash,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RestartDecision {
     /// Restart after waiting.
@@ -22,6 +37,8 @@ pub enum RestartDecision {
     GaveUp { attempts: i64, window_secs: i64 },
     /// The server exited cleanly (a requested stop), so there is nothing to do.
     CleanExit,
+    /// It never started. Retrying would repeat a deterministic failure.
+    FailedStart,
 }
 
 /// Exponential backoff: 5s, 10s, 20s, 40s… capped at [`MAX_DELAY_SECS`].
@@ -39,13 +56,17 @@ pub fn delay_for_attempt(attempt: i64) -> Duration {
 /// not counting the one being handled now.
 pub fn decide(
     auto_restart: bool,
-    clean_exit: bool,
+    exit: Exit,
     recent_crashes: i64,
     restart_max: i64,
     restart_window_s: i64,
 ) -> RestartDecision {
-    if clean_exit {
-        return RestartDecision::CleanExit;
+    match exit {
+        Exit::Requested => return RestartDecision::CleanExit,
+        // Checked before `auto_restart`, because the reason is worth reporting
+        // whether or not the user has restarts switched on.
+        Exit::FailedStart => return RestartDecision::FailedStart,
+        Exit::Crash => {}
     }
     if !auto_restart {
         return RestartDecision::Disabled;
@@ -74,6 +95,25 @@ pub fn is_crash(exit_code: Option<i32>, stop_requested: bool) -> bool {
     !matches!(exit_code, Some(0))
 }
 
+/// Sorts an exit into the three cases that matter.
+///
+/// `reached_ready` is whether the server printed its "Done" line during this
+/// run. Without it, the process died on the way up — a JVM that refused the
+/// heap, a missing jar, a taken port — and the fix is always something the user
+/// has to change.
+pub fn classify(stop_requested: bool, reached_ready: bool) -> Exit {
+    if stop_requested {
+        Exit::Requested
+    } else if !reached_ready {
+        Exit::FailedStart
+    } else {
+        // Past the "Done" line, any exit nobody asked for is a crash —
+        // including a clean exit 0 from an in-game `/stop` or a plugin, which
+        // is exactly what auto-restart is meant to bring back.
+        Exit::Crash
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,18 +132,24 @@ mod tests {
 
     #[test]
     fn a_clean_stop_never_restarts() {
-        assert_eq!(decide(true, true, 0, 3, 600), RestartDecision::CleanExit);
+        assert_eq!(
+            decide(true, Exit::Requested, 0, 3, 600),
+            RestartDecision::CleanExit
+        );
     }
 
     #[test]
     fn auto_restart_off_means_nothing_happens() {
-        assert_eq!(decide(false, false, 0, 3, 600), RestartDecision::Disabled);
+        assert_eq!(
+            decide(false, Exit::Crash, 0, 3, 600),
+            RestartDecision::Disabled
+        );
     }
 
     #[test]
     fn the_first_crash_restarts_after_the_base_delay() {
         assert_eq!(
-            decide(true, false, 0, 3, 600),
+            decide(true, Exit::Crash, 0, 3, 600),
             RestartDecision::Restart {
                 delay: Duration::from_secs(5),
                 attempt: 1
@@ -115,7 +161,7 @@ mod tests {
     fn a_server_that_crashes_instantly_gives_up_at_the_cap() {
         // Three crashes already inside the window, cap of three.
         assert_eq!(
-            decide(true, false, 3, 3, 600),
+            decide(true, Exit::Crash, 3, 3, 600),
             RestartDecision::GaveUp {
                 attempts: 4,
                 window_secs: 600
@@ -123,7 +169,7 @@ mod tests {
         );
         // And the attempt right before the cap still restarts, with a long wait.
         assert_eq!(
-            decide(true, false, 2, 3, 600),
+            decide(true, Exit::Crash, 2, 3, 600),
             RestartDecision::Restart {
                 delay: Duration::from_secs(20),
                 attempt: 3
@@ -134,7 +180,7 @@ mod tests {
     #[test]
     fn a_cap_of_zero_disables_restarting_entirely() {
         assert!(matches!(
-            decide(true, false, 0, 0, 600),
+            decide(true, Exit::Crash, 0, 0, 600),
             RestartDecision::GaveUp { .. }
         ));
     }
@@ -147,5 +193,56 @@ mod tests {
         // A stop the user asked for is never a crash, whatever the exit code.
         assert!(!is_crash(Some(143), true));
         assert!(!is_crash(Some(0), true));
+    }
+
+    #[test]
+    fn a_process_that_never_reached_ready_is_a_failed_start() {
+        // The reported case: a 32-bit JVM refusing -Xmx8192M exits 1 in under a
+        // second, having printed only "Invalid maximum heap size".
+        assert_eq!(classify(false, false), Exit::FailedStart);
+        // Even an exit 0 before "Done" is a start that did not happen.
+        assert_eq!(classify(false, false), Exit::FailedStart);
+        // Once the server said Done, the same exit is a crash worth retrying.
+        assert_eq!(classify(false, true), Exit::Crash);
+        // And a stop the user asked for is neither, ready or not.
+        assert_eq!(classify(true, true), Exit::Requested);
+        assert_eq!(classify(true, false), Exit::Requested);
+    }
+
+    #[test]
+    fn a_failed_start_is_never_retried() {
+        // Waiting five seconds does not fix a bad -Xmx, a missing jar or a
+        // taken port, so backoff must not touch this case at all.
+        for recent in [0, 1, 5] {
+            assert_eq!(
+                decide(true, Exit::FailedStart, recent, 3, 600),
+                RestartDecision::FailedStart,
+                "recent crashes must not turn a failed start into a retry"
+            );
+        }
+
+        // Not even with auto-restart switched on and a huge cap.
+        assert_eq!(
+            decide(true, Exit::FailedStart, 0, 100, 600),
+            RestartDecision::FailedStart
+        );
+    }
+
+    #[test]
+    fn backoff_still_applies_to_a_server_that_was_actually_running() {
+        assert_eq!(
+            decide(true, Exit::Crash, 0, 3, 600),
+            RestartDecision::Restart {
+                delay: Duration::from_secs(5),
+                attempt: 1
+            }
+        );
+        assert_eq!(
+            decide(true, Exit::Crash, 1, 3, 600),
+            RestartDecision::Restart {
+                delay: Duration::from_secs(10),
+                attempt: 2
+            }
+        );
     }
 }

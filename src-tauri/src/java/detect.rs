@@ -20,6 +20,7 @@ pub struct CachedProbe {
     pub full_version: Option<String>,
     pub vendor: Option<String>,
     pub arch: Option<String>,
+    pub bits: Option<i64>,
     pub valid: bool,
 }
 
@@ -31,6 +32,8 @@ pub struct Probe {
     pub full_version: Option<String>,
     pub vendor: Option<String>,
     pub arch: Option<String>,
+    /// 64 or 32, as the JVM reported it.
+    pub bits: Option<i64>,
     pub mtime: Option<i64>,
     pub size_bytes: Option<i64>,
     pub error: Option<String>,
@@ -227,6 +230,7 @@ pub fn probe(binary: &Path, source: JavaSource) -> Probe {
         full_version: None,
         vendor: None,
         arch: None,
+        bits: None,
         mtime,
         size_bytes,
         error: None,
@@ -254,12 +258,14 @@ pub fn probe(binary: &Path, source: JavaSource) -> Probe {
                     major,
                     full,
                     vendor,
+                    bits,
                     ..
                 }) => {
                     probe.major = Some(major);
                     probe.full_version = Some(full);
                     probe.vendor = vendor;
                     probe.arch = Some(arch_from_output(&text).to_string());
+                    probe.bits = Some(bits);
                 }
                 None => probe.error = Some("did not report a Java version".to_string()),
             }
@@ -271,7 +277,7 @@ pub fn probe(binary: &Path, source: JavaSource) -> Probe {
 }
 
 fn arch_from_output(text: &str) -> &'static str {
-    if text.contains("64-Bit") {
+    if version::bits_from_output(text) == 64 {
         "x64"
     } else {
         "x86"
@@ -298,6 +304,10 @@ pub fn cache_is_fresh(cached: &CachedProbe, mtime: Option<i64>, size: Option<i64
         && cached.mtime == mtime
         && cached.size_bytes.is_some()
         && cached.size_bytes == size
+        // Rows written before bitness was recorded have to be probed again:
+        // treating an unknown width as usable is what let a 32-bit JVM be
+        // picked in the first place.
+        && cached.bits.is_some()
 }
 
 /// Probes every candidate, reusing cache entries whose binary is unchanged.
@@ -316,6 +326,7 @@ pub fn detect_all(cached: &[CachedProbe]) -> Vec<Probe> {
                     full_version: hit.full_version.clone(),
                     vendor: hit.vendor.clone(),
                     arch: hit.arch.clone(),
+                    bits: hit.bits,
                     mtime,
                     size_bytes,
                     error: None,
@@ -342,8 +353,21 @@ mod tests {
             full_version: Some("21.0.10".into()),
             vendor: Some("Temurin".into()),
             arch: Some("x64".into()),
+            bits: Some(64),
             valid,
         }
+    }
+
+    #[test]
+    fn a_cached_row_without_bitness_is_probed_again() {
+        // Upgrading the app leaves rows detected before bitness existed. They
+        // cannot be trusted for selection, so the stamp check is not enough.
+        let mut entry = cached("/jdk/bin/java", Some(1000), Some(50), true);
+        entry.bits = None;
+        assert!(!cache_is_fresh(&entry, Some(1000), Some(50)));
+
+        entry.bits = Some(32);
+        assert!(cache_is_fresh(&entry, Some(1000), Some(50)), "known width is enough");
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { useUpdateInstance } from "@/features/instances/queries";
 import type { InstanceView } from "@/lib/types";
+import { isUsable, unsuitableReason } from "./javaLabels";
 import { useAddJava, useJavaRuntimes, useJavaStatus, useRescanJava } from "./queries";
 
 /**
@@ -94,9 +95,17 @@ export function JavaSettings({ instance }: { instance: InstanceView }) {
         >
           <option value="">Automatic (best match)</option>
           {runtimes.data?.map((runtime) => (
-            <option key={runtime.id} value={runtime.path}>
+            <option
+              key={runtime.id}
+              value={runtime.path}
+              // A 32-bit runtime stays visible so the list matches what is
+              // installed, but it cannot be chosen: it refuses the heap a
+              // server needs.
+              disabled={!isUsable(runtime)}
+            >
               Java {runtime.major}
               {runtime.vendor ? ` · ${runtime.vendor}` : ""} · {runtime.path}
+              {isUsable(runtime) ? "" : ` — ${unsuitableReason(runtime)}`}
             </option>
           ))}
         </Select>
@@ -106,6 +115,17 @@ export function JavaSettings({ instance }: { instance: InstanceView }) {
           </p>
         ) : null}
       </div>
+
+      {status.data?.message ? (
+        <p className="text-xs text-destructive">{status.data.message}</p>
+      ) : null}
+
+      {runtimes.data?.some((runtime) => !isUsable(runtime)) ? (
+        <p className="text-xs text-muted-foreground">
+          Greyed entries are 32-bit runtimes. They cannot address the memory a server is given,
+          so they are never chosen automatically.
+        </p>
+      ) : null}
 
       {runtimes.data && runtimes.data.length === 0 ? (
         <p className="text-xs text-muted-foreground">

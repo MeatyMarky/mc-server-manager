@@ -82,6 +82,27 @@ The per-version JSON at `piston-meta` states `javaVersion.majorVersion`, and tha
 install records. The table in `java/version.rs` is only the offline fallback (26.x needs
 Java 25, 1.20.5+ needs 21, 1.17+ needs 17, older needs 8).
 
+### A 32-bit JVM is never chosen, and never launched with a big heap
+`java -version` prints "64-Bit Server VM" for a 64-bit build; the absence of that
+marker means 32-bit, and `java_runtimes.bits` records which. 32-bit runtimes are excluded
+from automatic selection entirely (`JavaRuntime::usable_for_servers`) and shown greyed with
+"32-bit, not suitable for servers" — they stay in the list, because a user who browses to
+one deserves an explanation rather than a disappearance. A row with no recorded width is
+treated the same and re-probed on the next scan; assuming 64-bit is what let a
+`Program Files (x86)` Java 8 be picked in the first place.
+
+Preflight then refuses a launch the JVM would reject anyway: 32-bit plus an `-Xmx` above
+`MAX_HEAP_32BIT_MB` (1500) fails with the binary's path, its width and the way out, because
+the JVM's own "Invalid maximum heap size: -Xmx8192M" never says which Java produced it.
+
+### A start that never finished is not a crash
+Auto-restart exists for a server that was running and died. A process that exits before the
+"Done" line failed to start — a bad heap, a missing jar, a taken port — and retrying repeats
+a deterministic failure four times over while burying the real message. `backoff::classify`
+sorts exits into requested / failed-start / crash from whether `reached_ready` was ever set,
+failed starts are recorded as `failed_start` (so they never consume the crash budget), and
+the last console line is repeated with the reason instead of scrolling away.
+
 ### Downloads
 Bytes land in `<file>.part`, resume with a `Range` request when the server allows it, are
 checksum-verified before the rename, and only then take the final name. A half-downloaded

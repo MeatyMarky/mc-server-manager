@@ -316,6 +316,34 @@ pub async fn preview(
             ),
         });
 
+        // The event history says what the app decided and when — restarts,
+        // give-ups, failed starts, backups — which the console alone does not.
+        let events: Vec<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT ts, kind, detail FROM instance_events
+             WHERE instance_id = ? ORDER BY ts DESC LIMIT 50",
+        )
+        .bind(id)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+        parts.push(ReportPart {
+            name: "events.txt".into(),
+            purpose: "What the app did with this server: starts, crashes, restarts, backups."
+                .into(),
+            content: if events.is_empty() {
+                "Nothing recorded for this server yet.".into()
+            } else {
+                events
+                    .into_iter()
+                    .map(|(ts, kind, detail)| {
+                        format!("{ts} {kind}: {}", detail.unwrap_or_default())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("
+")
+            },
+        });
+
         let console: Vec<String> = state
             .supervisor
             .tail(&row.uuid, lines)
@@ -441,13 +469,24 @@ mod tests {
         let names: Vec<&str> = preview.parts.iter().map(|part| part.name.as_str()).collect();
         assert_eq!(
             names,
-            vec!["about.txt", "java.txt", "app.log", "instance.txt", "console.log"]
+            vec![
+                "about.txt",
+                "java.txt",
+                "app.log",
+                "instance.txt",
+                "events.txt",
+                "console.log"
+            ]
         );
 
         // Every part carries its real text, so the dialog can show it.
         let about = &preview.parts[0].content;
         assert!(about.contains(version()));
-        assert!(about.contains("schema version: 5"), "{about}");
+        let schema = schema_version(&state).await.expect("a migrated database");
+        assert!(
+            about.contains(&format!("schema version: {schema}")),
+            "{about}"
+        );
         assert!(preview.parts[2].content.contains("something happened"));
         assert!(preview.parts[3].content.contains("Survival"));
         assert!(preview.parts.iter().all(|part| !part.purpose.is_empty()));

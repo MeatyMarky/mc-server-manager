@@ -6,7 +6,7 @@
 //! pid is only ever trusted together with its recorded start time.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -44,6 +44,9 @@ struct Running {
     exited: Arc<AtomicBool>,
     /// Set before a deliberate stop, so the exit is not treated as a crash.
     stop_requested: Arc<AtomicBool>,
+    /// Set when the server printed its "Done" line. An exit before this is a
+    /// start that failed, not a crash, and must not be retried.
+    reached_ready: Arc<AtomicBool>,
 }
 
 /// Live process registry plus the console history, which outlives the process
@@ -125,6 +128,15 @@ impl Supervisor {
     /// A server that just started has nobody on it, and one that stopped has
     /// nobody either. Both cases replace the set rather than leaving the last
     /// session's names to be counted again.
+    /// Records that this server finished starting.
+    pub(crate) fn mark_ready(&self, uuid: &str) {
+        if let Ok(map) = self.running.lock() {
+            if let Some(running) = map.get(uuid) {
+                running.reached_ready.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
     pub(crate) fn reset_online(&self, uuid: &str) {
         if let Ok(mut map) = self.online.lock() {
             map.insert(uuid.to_string(), HashSet::new());
@@ -189,6 +201,7 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
     if let Some(pinned) = &instance.java_path {
         let path = PathBuf::from(pinned);
         if path.is_file() {
+            check_heap_fits(state, instance, &path).await?;
             return Ok(path);
         }
         return Err(AppError::JavaPinnedMissing {
@@ -198,7 +211,9 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
     }
 
     if let Some(runtime) = java::best_for(&state.db, required).await? {
-        return Ok(PathBuf::from(runtime.path));
+        let path = PathBuf::from(runtime.path);
+        check_heap_fits(state, instance, &path).await?;
+        return Ok(path);
     }
 
     // "No Java at all" and "Java, but too old" have different fixes, and the
@@ -217,6 +232,32 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         },
         None => AppError::JavaNotFound { required },
     })
+}
+
+/// Refuses a launch a 32-bit JVM would reject anyway.
+///
+/// The JVM's own refusal ("Invalid maximum heap size: -Xmx8192M") arrives in the
+/// console without naming which Java produced it, which is what made this hard
+/// to diagnose. Checking here means the error can name the binary, its width and
+/// the way out.
+async fn check_heap_fits(state: &AppState, instance: &Instance, java: &Path) -> AppResult<()> {
+    let jvm_args: Vec<String> = serde_json::from_str(&instance.jvm_args).unwrap_or_default();
+    let Some(heap_bytes) = launch::max_heap_bytes(instance.max_ram_mb, &jvm_args) else {
+        return Ok(());
+    };
+    let requested_mb = (heap_bytes / (1024 * 1024)) as i64;
+    if requested_mb <= crate::java::version::MAX_HEAP_32BIT_MB {
+        return Ok(());
+    }
+
+    if java::bits_of(&state.db, java).await == Some(32) {
+        return Err(AppError::Java32Bit {
+            path: java.to_string_lossy().to_string(),
+            requested_mb,
+            limit_mb: crate::java::version::MAX_HEAP_32BIT_MB,
+        });
+    }
+    Ok(())
 }
 
 /// Starts a server. Returns once the process is spawned; readiness arrives later
@@ -326,6 +367,7 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
 
     let exited = Arc::new(AtomicBool::new(false));
     let stop_requested = Arc::new(AtomicBool::new(false));
+    let reached_ready = Arc::new(AtomicBool::new(false));
 
     state.supervisor.insert(
         &instance.uuid,
@@ -334,11 +376,19 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
             stdin: stdin_tx,
             exited: exited.clone(),
             stop_requested: stop_requested.clone(),
+            reached_ready: reached_ready.clone(),
         },
     );
 
     spawn_console_pump(app.clone(), instance.clone(), console, line_rx);
-    spawn_monitor(app.clone(), instance, child, exited, stop_requested);
+    spawn_monitor(
+        app.clone(),
+        instance,
+        child,
+        exited,
+        stop_requested,
+        reached_ready,
+    );
 
     Ok(())
 }
@@ -418,6 +468,7 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
                 .execute(&state.db)
                 .await;
             state.supervisor.reset_online(&instance.uuid);
+            state.supervisor.mark_ready(&instance.uuid);
             // If the app died between save-off and save-on, this is the first
             // moment a console exists to put it right.
             crate::backup::saveguard::recover_on_start(&state, instance.id).await;
@@ -478,6 +529,7 @@ fn spawn_monitor(
     mut child: tokio::process::Child,
     exited: Arc<AtomicBool>,
     stop_requested: Arc<AtomicBool>,
+    reached_ready: Arc<AtomicBool>,
 ) {
     tauri::async_runtime::spawn(async move {
         use tauri::Manager;
@@ -491,7 +543,10 @@ fn spawn_monitor(
         state.supervisor.remove(&instance.uuid);
 
         let requested = stop_requested.load(Ordering::SeqCst);
-        let crashed = backoff::is_crash(code, requested);
+        let ready = reached_ready.load(Ordering::SeqCst);
+        let exit = backoff::classify(requested, ready);
+        let crashed = exit != backoff::Exit::Requested;
+        let failed_start = exit == backoff::Exit::FailedStart;
 
         let _ = sqlx::query(
             "UPDATE instances SET pid = NULL, process_start_time = NULL, last_exit_code = ?,
@@ -505,10 +560,28 @@ fn spawn_monitor(
         .execute(&state.db)
         .await;
 
+        // The last thing the process said is usually the whole explanation —
+        // "Invalid maximum heap size: -Xmx8192M", a stack trace, a port
+        // complaint — so a failed start repeats it instead of burying it.
+        let last_line = state
+            .supervisor
+            .tail(&instance.uuid, 40)
+            .into_iter()
+            .rev()
+            .map(|line| line.message.trim().to_string())
+            .find(|line| !line.is_empty());
+
         if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
             buffer.push_system(&match code {
+                Some(code) if failed_start => format!(
+                    "Server exited with code {code} before it finished starting. \
+                     Not restarting: a start that fails this way fails the same way every time."
+                ),
                 Some(code) if crashed => format!("Server exited with code {code}"),
                 Some(code) => format!("Server stopped (exit code {code})"),
+                None if failed_start => {
+                    "Server process ended before it finished starting. Not restarting.".to_string()
+                }
                 None => "Server process ended".to_string(),
             });
         }
@@ -522,15 +595,21 @@ fn spawn_monitor(
         events::instance_status(&app, &instance.uuid, status_now, code.map(i64::from));
         events::instances_changed(&app);
 
-        let _ = record_event(
-            &state.db,
-            instance.id,
-            if crashed { "crashed" } else { "stopped" },
-            Some(&format!("exit code {code:?}")),
-        )
-        .await;
+        // A failed start is recorded under its own kind: it must not count
+        // towards the crash window, or a few bad starts would exhaust the
+        // restart budget of a server that later runs fine.
+        let kind = match exit {
+            backoff::Exit::Requested => "stopped",
+            backoff::Exit::FailedStart => "failed_start",
+            backoff::Exit::Crash => "crashed",
+        };
+        let detail = match &last_line {
+            Some(line) if failed_start => format!("exit code {code:?}; last output: {line}"),
+            _ => format!("exit code {code:?}"),
+        };
+        let _ = record_event(&state.db, instance.id, kind, Some(&detail)).await;
 
-        if !crashed {
+        if exit == backoff::Exit::Requested {
             return;
         }
 
@@ -538,7 +617,7 @@ fn spawn_monitor(
         let recent = recent_crashes(&state, instance.id, instance.restart_window_s).await;
         match backoff::decide(
             instance.auto_restart,
-            false,
+            exit,
             recent.saturating_sub(1).max(0),
             instance.restart_max,
             instance.restart_window_s,
@@ -583,6 +662,17 @@ fn spawn_monitor(
                 if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
                     buffer.push_system(&message);
                 }
+                let _ = record_event(&state.db, instance.id, "error", Some(&message)).await;
+            }
+            backoff::RestartDecision::FailedStart => {
+                // Surfaced, not retried. The console line above already says
+                // what happened; this is the copy the Settings tab's event list
+                // and the problem report will show.
+                let message = match &last_line {
+                    Some(line) => format!("The server did not finish starting: {line}"),
+                    None => "The server did not finish starting.".to_string(),
+                };
+                tracing::warn!(instance = %instance.name, "{message}");
                 let _ = record_event(&state.db, instance.id, "error", Some(&message)).await;
             }
             backoff::RestartDecision::Disabled | backoff::RestartDecision::CleanExit => {}
@@ -1006,5 +1096,106 @@ mod tests {
 
         assert_eq!(recent_crashes(&state, 1, 600).await, 2);
         assert_eq!(recent_crashes(&state, 1, 7_200).await, 3);
+    }
+
+    /// An instance with the memory settings the bug report used.
+    async fn heap_case(max_ram_mb: i64, jvm_args: &str) -> (AppState, Instance) {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, std::env::temp_dir());
+        let now = now_rfc3339();
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, min_ram_mb, max_ram_mb, created_at, updated_at)
+             VALUES ('u1', 'Survival', 'Z:/survival', 'paper', '1.21.4', 'jar', ?, '[]', 1024, ?, ?, ?)",
+        )
+        .bind(jvm_args)
+        .bind(max_ram_mb)
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let instance = instance::get(&state.db, 1).await.unwrap();
+        (state, instance)
+    }
+
+    async fn seed_java(state: &AppState, path: &str, bits: i64) {
+        sqlx::query(
+            "INSERT INTO java_runtimes (path, major, bits, source, valid, detected_at)
+             VALUES (?, 8, ?, 'common_dir', 1, ?)",
+        )
+        .bind(path)
+        .bind(bits)
+        .bind(now_rfc3339())
+        .execute(&state.db)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_32_bit_jvm_is_refused_before_it_can_reject_the_heap_itself() {
+        let (state, instance) = heap_case(8192, "[]").await;
+        let java = "C:/Program Files (x86)/Java/jre1.8.0_451/bin/java.exe";
+        seed_java(&state, java, 32).await;
+
+        let err = check_heap_fits(&state, &instance, Path::new(java))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), "java_32bit");
+        // The JVM's own refusal never says which Java it was; this one does.
+        let message = err.user_message();
+        assert!(message.contains("(x86)"), "{message}");
+        assert!(message.contains("32-bit"), "{message}");
+        assert!(message.contains("8192"), "{message}");
+        assert!(err.hint().unwrap().contains("64-bit"));
+    }
+
+    #[tokio::test]
+    async fn a_32_bit_jvm_with_a_heap_it_can_hold_is_allowed() {
+        // Refusing every 32-bit launch would break a small server that works.
+        let (state, instance) = heap_case(1024, "[]").await;
+        let java = "C:/Program Files (x86)/Java/jre1.8.0_451/bin/java.exe";
+        seed_java(&state, java, 32).await;
+
+        assert!(check_heap_fits(&state, &instance, Path::new(java)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_64_bit_jvm_is_never_blocked_by_the_heap_check() {
+        let (state, instance) = heap_case(8192, "[]").await;
+        let java = "C:/Program Files/Java/jdk-21/bin/java.exe";
+        seed_java(&state, java, 64).await;
+
+        assert!(check_heap_fits(&state, &instance, Path::new(java)).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_custom_xmx_is_what_gets_checked_not_the_ram_field() {
+        // The form says 1 GB, the JVM args say 8 GB, and the JVM reads the last
+        // -Xmx it is given.
+        let (state, instance) = heap_case(1024, r#"["-Xmx8G"]"#).await;
+        let java = "C:/Program Files (x86)/Java/jre1.8.0_451/bin/java.exe";
+        seed_java(&state, java, 32).await;
+
+        assert_eq!(
+            check_heap_fits(&state, &instance, Path::new(java))
+                .await
+                .unwrap_err()
+                .kind(),
+            "java_32bit"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_runtime_of_unknown_width_does_not_block_a_launch() {
+        // Nothing proves this one is 32-bit, and refusing to start on a guess
+        // would be worse than the JVM's own error.
+        let (state, instance) = heap_case(8192, "[]").await;
+
+        assert!(check_heap_fits(&state, &instance, Path::new("/nowhere/bin/java"))
+            .await
+            .is_ok());
     }
 }

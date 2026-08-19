@@ -109,6 +109,16 @@ pub enum AppError {
     #[error("the Java pinned for \"{instance}\" is missing: {path}")]
     JavaPinnedMissing { instance: String, path: String },
 
+    /// A 32-bit JVM asked for a heap it cannot address. Caught before the
+    /// process is spawned, because the JVM's own message ("Invalid maximum heap
+    /// size") never says which Java was used.
+    #[error("{path} is a 32-bit JVM and cannot allocate {requested_mb} MB (limit about {limit_mb} MB)")]
+    Java32Bit {
+        path: String,
+        requested_mb: i64,
+        limit_mb: i64,
+    },
+
     #[error("the Minecraft EULA has not been accepted for \"{0}\"")]
     EulaNotAccepted(String),
 
@@ -167,6 +177,7 @@ impl AppError {
             AppError::RateLimited { .. } => "rate_limited",
             AppError::JavaTooOld { .. } => "java_too_old",
             AppError::JavaPinnedMissing { .. } => "java_pinned_missing",
+            AppError::Java32Bit { .. } => "java_32bit",
             AppError::EulaNotAccepted(_) => "eula_not_accepted",
             AppError::NotInstalled(_) => "not_installed",
             AppError::InstanceCorrupt { .. } => "instance_corrupt",
@@ -268,6 +279,14 @@ impl AppError {
             AppError::JavaPinnedMissing { instance, path } => format!(
                 "The Java chosen for \"{instance}\" is no longer at {path}."
             ),
+            AppError::Java32Bit {
+                path,
+                requested_mb,
+                limit_mb,
+            } => format!(
+                "The Java at {path} is 32-bit, so it cannot be given {requested_mb} MB of memory \
+                 — about {limit_mb} MB is its ceiling."
+            ),
             AppError::PortInUse {
                 port,
                 taken_by: Some(who),
@@ -350,6 +369,11 @@ impl AppError {
                 "Pick another Java for this server in its Settings tab, or clear the pin to let \
                  the app choose."
             }
+            AppError::Java32Bit { .. } => {
+                "Install a 64-bit JDK and pick it in this server's Settings tab — 32-bit runtimes \
+                 are never chosen automatically. Lowering the memory below the ceiling also works, \
+                 but a server that small is rarely worth running."
+            }
             AppError::PortInUse {
                 taken_by: Some(_), ..
             } => "Stop that server first, or give this one a different server-port in Config.",
@@ -420,6 +444,16 @@ impl Serialize for AppError {
             } => s.serialize_field(
                 "detail",
                 &serde_json::json!({ "required": required, "found": found, "mcVersion": mc_version }),
+            )?,
+            AppError::Java32Bit {
+                path,
+                requested_mb,
+                limit_mb,
+            } => s.serialize_field(
+                "detail",
+                &serde_json::json!({
+                    "path": path, "requestedMb": requested_mb, "limitMb": limit_mb, "bits": 32
+                }),
             )?,
             AppError::PortInUse { port, taken_by } => s.serialize_field(
                 "detail",
@@ -537,6 +571,11 @@ mod tests {
             AppError::JavaPinnedMissing {
                 instance: "Survival".into(),
                 path: "C:/jdk17/bin/java.exe".into(),
+            },
+            AppError::Java32Bit {
+                path: "C:/Program Files (x86)/Java/jre1.8.0_451/bin/java.exe".into(),
+                requested_mb: 8192,
+                limit_mb: 1500,
             },
             AppError::PortInUse {
                 port: 25565,

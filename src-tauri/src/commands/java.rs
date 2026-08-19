@@ -58,19 +58,33 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
 
         return Ok(match known {
             Some(runtime) => {
-                let ok = java::satisfies(runtime.major, required);
+                let version_ok = java::satisfies(runtime.major, required);
+                // Bitness is checked here too: a pinned 32-bit runtime satisfies
+                // the version and still cannot run the server, which is exactly
+                // how it went unnoticed.
+                let width_ok = runtime.usable_for_servers();
+                let message = if !version_ok {
+                    Some(format!(
+                        "This instance is pinned to Java {}, but Minecraft {} needs Java {required}.",
+                        runtime.major, instance.mc_version
+                    ))
+                } else {
+                    runtime.unsuitable_reason().map(|reason| {
+                        format!(
+                            "The pinned Java at {} is {reason}. Pick a 64-bit runtime, or the \
+                             server will refuse the memory it is given.",
+                            runtime.path
+                        )
+                    })
+                };
+
                 JavaStatus {
                     required_major: required,
-                    message: (!ok).then(|| {
-                        format!(
-                            "This instance is pinned to Java {}, but Minecraft {} needs Java {required}.",
-                            runtime.major, instance.mc_version
-                        )
-                    }),
+                    message,
                     selected: Some(runtime),
                     pinned_path: Some(pinned),
                     pinned_valid: true,
-                    mismatch: !ok,
+                    mismatch: !version_ok || !width_ok,
                 }
             }
             None => JavaStatus {
@@ -87,13 +101,28 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
     }
 
     let best = java::best_for(&state.db, required).await?;
+    // When nothing is selectable, say whether the machine has *no* Java of that
+    // version or only 32-bit ones — the fix is different.
+    let excluded_32bit = best.is_none()
+        && java::list(&state.db)
+            .await?
+            .iter()
+            .any(|runtime| java::satisfies(runtime.major, required) && !runtime.usable_for_servers());
+
     Ok(JavaStatus {
         required_major: required,
         message: best.is_none().then(|| {
-            format!(
-                "Minecraft {} needs Java {required}; no installed runtime satisfies that.",
-                instance.mc_version
-            )
+            if excluded_32bit {
+                format!(
+                    "The only Java {required} on this computer is 32-bit, which cannot run a \
+                     server. Install a 64-bit JDK and rescan."
+                )
+            } else {
+                format!(
+                    "Minecraft {} needs Java {required}; no installed runtime satisfies that.",
+                    instance.mc_version
+                )
+            }
         }),
         mismatch: best.is_none(),
         selected: best,

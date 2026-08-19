@@ -5,4 +5,9 @@ export type JavaRuntime = { id: number,
 /**
  * Absolute path to the `java` binary.
  */
-path: string, major: number, fullVersion: string | null, vendor: string | null, arch: string | null, source: JavaSource, valid: boolean, detectedAt: string, };
+path: string, major: number, fullVersion: string | null, vendor: string | null, arch: string | null, 
+/**
+ * 64 or 32, as the JVM reported it. `None` only for rows detected by a
+ * build that predates this column; those are re-probed on the next scan.
+ */
+bits: number | null, source: JavaSource, valid: boolean, detectedAt: string, };
