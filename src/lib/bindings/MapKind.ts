@@ -3,4 +3,4 @@
 /**
  * The two map mods this app knows how to install and read.
  */
-export type MapKind = "blue_map" | "dynmap";
+export type MapKind = "blue_map" | "dynmap" | "squaremap";

@@ -10,6 +10,10 @@ export type MapStatus = {
  */
 kind: MapKind | null, 
 /**
+ * What to call it on screen, so the page never keeps its own list of names.
+ */
+label: string | null, 
+/**
  * The maps this server type could have, for the offer when it has none.
  */
 available: Array<MapKind>, 

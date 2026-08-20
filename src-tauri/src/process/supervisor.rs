@@ -48,7 +48,12 @@ fn stop_sequence(kind: Option<crate::map::MapKind>) -> Vec<&'static str> {
     match kind {
         None => Vec::new(),
         Some(crate::map::MapKind::BlueMap) => vec!["save-all flush", "bluemap stop"],
-        Some(crate::map::MapKind::Dynmap) => vec!["save-all flush"],
+        // Neither of these has a stop command worth sending: squaremap's render
+        // threads come down with the server, and Dynmap's likewise. The flush
+        // still applies, because it is the world that matters.
+        Some(crate::map::MapKind::Squaremap) | Some(crate::map::MapKind::Dynmap) => {
+            vec!["save-all flush"]
+        }
     }
 }
 
@@ -1635,6 +1640,14 @@ mod tests {
     #[test]
     fn a_plain_server_is_stopped_with_nothing_but_stop() {
         assert!(stop_sequence(None).is_empty());
+    }
+
+    #[test]
+    fn every_map_flushes_the_world_before_the_stop() {
+        for kind in crate::map::ALL_KINDS {
+            let sequence = stop_sequence(Some(kind));
+            assert_eq!(sequence.first(), Some(&"save-all flush"), "{kind:?}");
+        }
     }
 
     #[test]

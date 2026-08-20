@@ -92,7 +92,7 @@ async fn a_1_16_5_server_gets_java_8_from_the_app_and_keeps_it() {
             max_ram_mb: Some(1024),
             notes: None,
             color: None,
-            web_map: false,
+            web_map: None,
         },
     )
     .await
@@ -329,7 +329,7 @@ async fn a_1_16_5_server_boots_on_the_managed_java_8() {
             max_ram_mb: Some(1024),
             notes: None,
             color: None,
-            web_map: false,
+            web_map: None,
         },
     )
     .await

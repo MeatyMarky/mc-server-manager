@@ -13,10 +13,32 @@ pub async fn map_status(state: State<'_, AppState>, id: i64) -> AppResult<MapSta
     map::status(&state, id).await
 }
 
-/// The maps a server type can run, for the create dialog's checkbox.
+/// One map a server type can run, as the create dialog's dropdown lists it.
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct MapOption {
+    pub kind: MapKind,
+    pub label: String,
+    /// The one line that makes the difference between them visible.
+    pub summary: String,
+    pub default_port: u16,
+}
+
+/// The maps a server type can run, best first.
 #[tauri::command]
-pub async fn map_kinds_for(server_type: crate::db::models::ServerType) -> AppResult<Vec<MapKind>> {
-    Ok(map::kinds_for(server_type))
+pub async fn map_kinds_for(
+    server_type: crate::db::models::ServerType,
+) -> AppResult<Vec<MapOption>> {
+    Ok(map::kinds_for(server_type)
+        .into_iter()
+        .map(|kind| MapOption {
+            label: kind.label().to_string(),
+            summary: kind.summary().to_string(),
+            default_port: kind.default_port(),
+            kind,
+        })
+        .collect())
 }
 
 /// Installs a map mod through the ordinary mod path, then puts it on a port

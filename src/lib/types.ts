@@ -28,6 +28,7 @@ export type { VersionKind } from "./bindings/VersionKind";
 export type { NetworkView } from "./bindings/NetworkView";
 export type { MapAddresses } from "./bindings/MapAddresses";
 export type { MapKind } from "./bindings/MapKind";
+export type { MapOption } from "./bindings/MapOption";
 export type { MapStatus } from "./bindings/MapStatus";
 export type { NetAddress } from "./bindings/NetAddress";
 export type { AddressKind } from "./bindings/AddressKind";

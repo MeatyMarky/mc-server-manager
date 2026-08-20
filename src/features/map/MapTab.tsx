@@ -47,7 +47,7 @@ export function MapTab({ instance }: { instance: InstanceView }) {
   }
 
   const map = status.data;
-  const mapName = map.kind === "blue_map" ? "BlueMap" : "Dynmap";
+  const mapName = map.label ?? "The map";
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">

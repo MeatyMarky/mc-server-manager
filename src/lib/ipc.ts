@@ -26,6 +26,7 @@ import type {
   JavaStatus,
   ScanInfo,
   MapKind,
+  MapOption,
   MappingResult,
   MapStatus,
   PublicAddress,
@@ -161,7 +162,7 @@ export const ipc = {
   javaScanInfo: () => invoke<ScanInfo>("java_scan_info"),
 
   mapStatus: (id: number) => invoke<MapStatus>("map_status", { id }),
-  mapKindsFor: (serverType: ServerType) => invoke<MapKind[]>("map_kinds_for", { serverType }),
+  mapKindsFor: (serverType: ServerType) => invoke<MapOption[]>("map_kinds_for", { serverType }),
   mapInstall: (id: number, kind: MapKind) => invoke<string>("map_install", { id, kind }),
   mapUninstall: (id: number) => invoke<void>("map_uninstall", { id }),
   mapAcceptDownload: (id: number) => invoke<boolean>("map_accept_download", { id }),

@@ -31,7 +31,12 @@ use crate::state::AppState;
 pub enum MapKind {
     BlueMap,
     Dynmap,
+    Squaremap,
 }
+
+/// Every map this app can install, in the order the create dialog offers them:
+/// the best-looking, the lightest, and the one with the plugin ecosystem.
+pub const ALL_KINDS: [MapKind; 3] = [MapKind::BlueMap, MapKind::Squaremap, MapKind::Dynmap];
 
 impl MapKind {
     /// The Modrinth project, so installation goes through the existing source
@@ -40,6 +45,22 @@ impl MapKind {
         match self {
             MapKind::BlueMap => "bluemap",
             MapKind::Dynmap => "dynmap",
+            MapKind::Squaremap => "squaremap",
+        }
+    }
+
+    /// The one line that makes the choice between them meaningful.
+    pub fn summary(self) -> &'static str {
+        match self {
+            MapKind::BlueMap => {
+                "3D and the best looking. Heaviest to render, and needs a browser with WebGL."
+            }
+            MapKind::Squaremap => {
+                "2D, vanilla-looking tiles. Fastest to render and the lightest on disk."
+            }
+            MapKind::Dynmap => {
+                "2D, and the one most other plugins integrate with. Long-established."
+            }
         }
     }
 
@@ -48,6 +69,7 @@ impl MapKind {
         match self {
             MapKind::BlueMap => "blue_map",
             MapKind::Dynmap => "dynmap",
+            MapKind::Squaremap => "squaremap",
         }
     }
 
@@ -55,6 +77,8 @@ impl MapKind {
         match self {
             MapKind::BlueMap => "BlueMap",
             MapKind::Dynmap => "Dynmap",
+            // Lowercase is how the project writes its own name.
+            MapKind::Squaremap => "squaremap",
         }
     }
 
@@ -64,6 +88,7 @@ impl MapKind {
         match self {
             MapKind::BlueMap => 8100,
             MapKind::Dynmap => 8123,
+            MapKind::Squaremap => 8080,
         }
     }
 
@@ -76,6 +101,9 @@ impl MapKind {
         match self {
             MapKind::BlueMap => format!("bluemap update {world}"),
             MapKind::Dynmap => format!("dynmap fullrender {world}"),
+            // squaremap names worlds by dimension, not by folder: its command
+            // parser takes a world identifier, and `level-name` is not one.
+            MapKind::Squaremap => "squaremap fullrender minecraft:overworld".to_string(),
         }
     }
 
@@ -84,6 +112,7 @@ impl MapKind {
         match self {
             MapKind::BlueMap => "bluemap",
             MapKind::Dynmap => "dynmap",
+            MapKind::Squaremap => "squaremap",
         }
     }
 
@@ -106,6 +135,16 @@ impl MapKind {
                 server_type,
                 ServerType::Paper | ServerType::Purpur | ServerType::Forge
             ),
+            // Fabric, NeoForge and the Bukkit family. Forge is left out on
+            // purpose: squaremap's last Forge build is 1.2.0, for 1.20.1 only,
+            // so offering it would mostly offer an install that cannot resolve.
+            MapKind::Squaremap => matches!(
+                server_type,
+                ServerType::Fabric
+                    | ServerType::NeoForge
+                    | ServerType::Paper
+                    | ServerType::Purpur
+            ),
         }
     }
 }
@@ -116,7 +155,7 @@ impl MapKind {
 /// configuration to be useful. Vanilla loads neither, and gets an empty list
 /// rather than an offer it cannot honour.
 pub fn kinds_for(server_type: ServerType) -> Vec<MapKind> {
-    [MapKind::BlueMap, MapKind::Dynmap]
+    ALL_KINDS
         .into_iter()
         .filter(|kind| kind.supports(server_type))
         .collect()
@@ -175,6 +214,8 @@ pub fn detect(instance: &Instance) -> AppResult<Option<Installed>> {
 pub struct MapStatus {
     /// The map mod installed in this instance, if any.
     pub kind: Option<MapKind>,
+    /// What to call it on screen, so the page never keeps its own list of names.
+    pub label: Option<String>,
     /// The maps this server type could have, for the offer when it has none.
     pub available: Vec<MapKind>,
     /// The port its config names. `None` until the mod has written one, which
@@ -261,6 +302,7 @@ pub async fn status(state: &AppState, id: i64) -> AppResult<MapStatus> {
     };
 
     Ok(MapStatus {
+        label: kind.map(|kind| kind.label().to_string()),
         download_blocked: match kind {
             Some(MapKind::BlueMap) => config::download_blocked(&row).await?,
             _ => false,
@@ -303,6 +345,11 @@ pub fn view_url(kind: MapKind, port: u16, world: &str, spawn: Option<(i64, i64, 
         MapKind::Dynmap => {
             format!("{base}/?worldname={world}&mapname=surface&zoom=4&x={x}&y={y}&z={z}")
         }
+        // squaremap names the world by dimension rather than by folder, and
+        // takes no height: its tiles are flat.
+        MapKind::Squaremap => {
+            format!("{base}/?world=minecraft_overworld&zoom=2&x={x}&z={z}")
+        }
     }
 }
 
@@ -317,6 +364,9 @@ fn tile_dir(instance_path: &Path, server_type: ServerType, kind: MapKind) -> Pat
     match kind {
         // BlueMap's default `data` folder, holding one folder per map.
         MapKind::BlueMap => instance_path.join("bluemap").join("web").join("maps"),
+        MapKind::Squaremap => squaremap_data_dir(instance_path, server_type)
+            .join("web")
+            .join("tiles"),
         MapKind::Dynmap => match server_type {
             ServerType::Paper | ServerType::Purpur => instance_path
                 .join("plugins")
@@ -325,6 +375,15 @@ fn tile_dir(instance_path: &Path, server_type: ServerType, kind: MapKind) -> Pat
                 .join("tiles"),
             _ => instance_path.join("dynmap").join("web").join("tiles"),
         },
+    }
+}
+
+/// squaremap's data folder: `plugins/squaremap` on the Bukkit family, and a
+/// top-level `squaremap` beside the server jar on the mod loaders.
+pub fn squaremap_data_dir(instance_path: &Path, server_type: ServerType) -> PathBuf {
+    match server_type {
+        ServerType::Paper | ServerType::Purpur => instance_path.join("plugins").join("squaremap"),
+        _ => instance_path.join("squaremap"),
     }
 }
 
@@ -475,19 +534,25 @@ where
 
     let port = free_port(state, id, kind).await?;
 
-    // BlueMap needs its config before its first start, not after it. Two
-    // reasons: `accept-download` defaults to false and BlueMap stops on the
-    // first start without it ("BlueMap is missing important resources!"), and a
-    // port chosen after that start would only take effect on the next one.
-    // BlueMap creates these files only when they are missing, so writing them
-    // first settles both — and neither is ever overwritten.
-    if kind == MapKind::BlueMap {
-        config::ensure_core_conf(&row).await?;
-        config::ensure_webserver_conf(&row, port).await?;
-    } else {
-        // Dynmap has no such gate; its config is written on the first start and
-        // the port is moved from there.
-        let _ = config::write_port(&row, kind, port).await;
+    // A config written before the first start is the only way the chosen port
+    // is the one the map opens on: both of these write their config on that
+    // start, and a port set afterwards takes effect only on the next one.
+    // Neither project overwrites a config that already exists.
+    match kind {
+        MapKind::BlueMap => {
+            // And `accept-download` has to be there too, or BlueMap stops with
+            // "BlueMap is missing important resources!".
+            config::ensure_core_conf(&row).await?;
+            config::ensure_webserver_conf(&row, port).await?;
+        }
+        MapKind::Squaremap => {
+            config::ensure_squaremap_conf(&row, port).await?;
+        }
+        // Dynmap writes its config on the first start and the port is moved
+        // from there; its file has too many keys to write a useful stub.
+        MapKind::Dynmap => {
+            let _ = config::write_port(&row, kind, port).await;
+        }
     }
 
     Ok(format!(
@@ -497,7 +562,7 @@ where
             MapKind::BlueMap =>
                 ". It downloads a Minecraft client jar from Mojang on the first start, to take \
                  block textures out of it.",
-            MapKind::Dynmap => ".",
+            MapKind::Squaremap | MapKind::Dynmap => ".",
         }
     ))
 }
@@ -525,11 +590,8 @@ pub async fn forget(state: &AppState, id: i64) -> AppResult<()> {
 
 /// The map an instance was created wanting, if any.
 pub fn wanted(instance: &Instance) -> Option<MapKind> {
-    match instance.map_kind.as_deref()? {
-        "blue_map" => Some(MapKind::BlueMap),
-        "dynmap" => Some(MapKind::Dynmap),
-        _ => None,
-    }
+    let stored = instance.map_kind.as_deref()?;
+    ALL_KINDS.into_iter().find(|kind| kind.as_str() == stored)
 }
 
 #[cfg(test)]
@@ -538,34 +600,111 @@ mod tests {
 
     #[test]
     fn each_map_is_offered_only_where_it_runs() {
-        // Dynmap has no Fabric or NeoForge build this app would install.
+        // Dynmap has no Fabric or NeoForge build this app would install;
+        // squaremap has both.
         assert_eq!(
             kinds_for(ServerType::Fabric),
-            vec![MapKind::BlueMap],
+            vec![MapKind::BlueMap, MapKind::Squaremap],
             "fabric"
         );
         assert_eq!(
             kinds_for(ServerType::NeoForge),
-            vec![MapKind::BlueMap],
+            vec![MapKind::BlueMap, MapKind::Squaremap],
             "neoforge"
         );
-        // Forge and the Bukkit family can have either.
+        // squaremap's last Forge build is 1.2.0, for 1.20.1 alone, so Forge
+        // gets the two that still ship for it.
         assert_eq!(
             kinds_for(ServerType::Forge),
             vec![MapKind::BlueMap, MapKind::Dynmap]
         );
-        assert_eq!(
-            kinds_for(ServerType::Paper),
-            vec![MapKind::BlueMap, MapKind::Dynmap]
-        );
-        assert_eq!(
-            kinds_for(ServerType::Purpur),
-            vec![MapKind::BlueMap, MapKind::Dynmap]
-        );
-        // Vanilla loads neither, so nothing is offered rather than something
-        // that would fail at install time.
+        // The Bukkit family can have all three.
+        for server_type in [ServerType::Paper, ServerType::Purpur] {
+            assert_eq!(
+                kinds_for(server_type),
+                vec![MapKind::BlueMap, MapKind::Squaremap, MapKind::Dynmap],
+                "{server_type:?}"
+            );
+        }
+        // Vanilla loads none of them, so nothing is offered rather than
+        // something that would fail at install time.
         assert!(kinds_for(ServerType::Vanilla).is_empty());
         assert_eq!(default_for(ServerType::Vanilla), None);
+    }
+
+    #[test]
+    fn every_map_describes_itself_and_names_itself_once() {
+        // The dropdown shows these, so an empty one is a blank option.
+        for kind in ALL_KINDS {
+            assert!(!kind.summary().is_empty(), "{kind:?}");
+            assert!(kind.summary().ends_with('.'), "{kind:?}");
+            assert!(!kind.label().is_empty(), "{kind:?}");
+        }
+        // Stored values have to stay distinct, and stay what `wanted` reads.
+        let stored: Vec<&str> = ALL_KINDS.iter().map(|kind| kind.as_str()).collect();
+        assert_eq!(
+            stored.len(),
+            stored.iter().collect::<std::collections::HashSet<_>>().len()
+        );
+        for kind in ALL_KINDS {
+            let mut instance = crate::db::models::Instance::fixture();
+            instance.map_kind = Some(kind.as_str().to_string());
+            assert_eq!(wanted(&instance), Some(kind));
+        }
+    }
+
+    #[test]
+    fn ports_and_slugs_do_not_collide_between_maps() {
+        let ports: std::collections::HashSet<u16> =
+            ALL_KINDS.iter().map(|kind| kind.default_port()).collect();
+        assert_eq!(ports.len(), ALL_KINDS.len(), "each map has its own default");
+
+        let slugs: std::collections::HashSet<&str> =
+            ALL_KINDS.iter().map(|kind| kind.project_slug()).collect();
+        assert_eq!(slugs.len(), ALL_KINDS.len());
+    }
+
+    #[test]
+    fn squaremap_opens_on_the_spawn_in_its_own_url_shape() {
+        let url = view_url(MapKind::Squaremap, 8080, "survival", Some((3000, 71, -1200)));
+        // squaremap names worlds by dimension, so `level-name` is not in it.
+        assert!(url.contains("world=minecraft_overworld"), "{url}");
+        assert!(url.contains("x=3000"), "{url}");
+        assert!(url.contains("z=-1200"), "{url}");
+        assert!(!url.contains("survival"), "{url}");
+        // Its tiles are flat, so there is no height in the address.
+        assert!(!url.contains("y="), "{url}");
+
+        assert_eq!(
+            view_url(MapKind::Squaremap, 8080, "survival", None),
+            "http://127.0.0.1:8080"
+        );
+    }
+
+    #[test]
+    fn squaremap_renders_by_dimension_rather_than_folder() {
+        // Its command parser takes a world identifier; `level-name` is not one.
+        assert_eq!(
+            MapKind::Squaremap.render_command("survival"),
+            "squaremap fullrender minecraft:overworld"
+        );
+    }
+
+    #[test]
+    fn squaremap_keeps_its_data_where_the_server_type_expects() {
+        let root = Path::new("Z:/survival");
+        for server_type in [ServerType::Paper, ServerType::Purpur] {
+            let dir = squaremap_data_dir(root, server_type);
+            assert!(
+                dir.to_string_lossy().replace('\\', "/").ends_with("plugins/squaremap"),
+                "{dir:?}"
+            );
+        }
+        for server_type in [ServerType::Fabric, ServerType::NeoForge] {
+            let dir = squaremap_data_dir(root, server_type);
+            assert!(dir.to_string_lossy().replace('\\', "/").ends_with("survival/squaremap"));
+            assert!(!dir.to_string_lossy().contains("plugins"));
+        }
     }
 
     #[test]

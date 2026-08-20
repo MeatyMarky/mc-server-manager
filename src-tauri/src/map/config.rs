@@ -23,6 +23,9 @@ pub fn config_path(instance: &Instance, kind: MapKind) -> PathBuf {
     let root = instance.path_buf();
     match kind {
         MapKind::BlueMap => root.join("config").join("bluemap").join("webserver.conf"),
+        MapKind::Squaremap => {
+            super::squaremap_data_dir(&root, instance.server_type).join("config.yml")
+        }
         MapKind::Dynmap => match instance.server_type {
             ServerType::Paper | ServerType::Purpur => root
                 .join("plugins")
@@ -38,7 +41,80 @@ fn port_key(kind: MapKind) -> &'static str {
     match kind {
         MapKind::BlueMap => "port",
         MapKind::Dynmap => "webserver-port",
+        // squaremap nests it: settings.internal-webserver.port. A bare `port`
+        // scan would find the wrong key, so this one is read by path.
+        MapKind::Squaremap => "port",
     }
+}
+
+/// The path squaremap keeps its port under, outermost key first.
+const SQUAREMAP_PORT_PATH: [&str; 3] = ["settings", "internal-webserver", "port"];
+
+/// Whether a line at `indent` continues `path`, and the key it holds.
+///
+/// YAML by indentation, which is all that is needed to tell
+/// `settings.internal-webserver.port` from the half-dozen other keys called
+/// `port` a config might hold. Only the nesting is tracked — anchors, flow
+/// mappings and multi-line strings are not, because squaremap's config uses
+/// none of them.
+fn nested_key<'a>(line: &'a str, stack: &mut Vec<(usize, String)>) -> Option<(Vec<String>, &'a str)> {
+    let body = line.trim_end_matches(['\r', '\n']);
+    let trimmed = body.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('-') {
+        return None;
+    }
+    let indent = body.len() - trimmed.len();
+    let (name, value) = trimmed.split_once(':')?;
+    let name = name.trim().trim_matches('"').trim_matches('\'');
+
+    while stack.last().is_some_and(|(depth, _)| *depth >= indent) {
+        stack.pop();
+    }
+
+    let mut path: Vec<String> = stack.iter().map(|(_, key)| key.clone()).collect();
+    path.push(name.to_string());
+
+    if value.trim().is_empty() {
+        // A parent: the keys under it are what this was tracking for.
+        stack.push((indent, name.to_string()));
+    }
+
+    Some((path, value))
+}
+
+/// squaremap's config, written before its first start so the chosen port is
+/// the one it opens on.
+///
+/// squaremap fills in every key it does not find, so these three are enough —
+/// and unlike BlueMap it has no download to accept: it draws its tiles from the
+/// server's own block colours, with nothing to fetch from Mojang.
+pub fn squaremap_conf(port: u16) -> String {
+    format!(
+        "\
+# Written by Minecraft Server Manager when squaremap was installed.
+# The port was chosen because nothing else on this computer was using it.
+settings:
+  internal-webserver:
+    enabled: true
+    bind: 0.0.0.0
+    port: {port}
+"
+    )
+}
+
+/// Writes squaremap's config, if it is not there already.
+pub async fn ensure_squaremap_conf(instance: &Instance, port: u16) -> AppResult<bool> {
+    let path = config_path(instance, MapKind::Squaremap);
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .ctx("create the squaremap config folder", parent)?;
+    }
+    write_atomic(&path, &squaremap_conf(port)).await?;
+    Ok(true)
 }
 
 /// BlueMap's second config, holding the one setting it refuses to start without.
@@ -112,6 +188,25 @@ pub fn accepts_download(contents: &str) -> Option<bool> {
 /// the key means `port` never matches BlueMap's neighbouring `accept-download`
 /// or Dynmap's `webserver-bindaddress`.
 pub fn parse_port(contents: &str, kind: MapKind) -> Option<u16> {
+    if kind == MapKind::Squaremap {
+        let mut stack: Vec<(usize, String)> = Vec::new();
+        for line in contents.lines() {
+            let Some((path, value)) = nested_key(line, &mut stack) else {
+                continue;
+            };
+            if path == SQUAREMAP_PORT_PATH {
+                return value
+                    .split('#')
+                    .next()
+                    .unwrap_or(value)
+                    .trim()
+                    .parse::<u16>()
+                    .ok();
+            }
+        }
+        return None;
+    }
+
     let key = port_key(kind);
     for line in contents.lines() {
         let trimmed = line.trim();
@@ -144,6 +239,31 @@ pub fn parse_port(contents: &str, kind: MapKind) -> Option<u16> {
 /// would mean guessing where it belongs in a format this app does not otherwise
 /// understand.
 pub fn with_port(contents: &str, kind: MapKind, port: u16) -> Option<String> {
+    if kind == MapKind::Squaremap {
+        let mut stack: Vec<(usize, String)> = Vec::new();
+        let mut found = false;
+        let mut out = String::with_capacity(contents.len());
+        for line in contents.split_inclusive('\n') {
+            let body = line.trim_end_matches(['\r', '\n']);
+            let ending = &line[body.len()..];
+            match nested_key(line, &mut stack) {
+                Some((path, _)) if !found && path == SQUAREMAP_PORT_PATH => {
+                    let trimmed = body.trim_start();
+                    let indent = &body[..body.len() - trimmed.len()];
+                    let name = trimmed.split_once(':').map(|(name, _)| name).unwrap_or("port");
+                    out.push_str(indent);
+                    out.push_str(name);
+                    out.push_str(": ");
+                    out.push_str(&port.to_string());
+                    out.push_str(ending);
+                    found = true;
+                }
+                _ => out.push_str(line),
+            }
+        }
+        return found.then_some(out);
+    }
+
     let key = port_key(kind);
     let mut found = false;
     let mut out = String::with_capacity(contents.len());
@@ -448,6 +568,85 @@ disable-webserver: false
         assert!(after.contains("render-thread-count: 2"), "{after}");
         assert!(after.contains("## BlueMap core config"), "{after}");
         assert!(!download_blocked(&instance).await.unwrap());
+    }
+
+    /// squaremap's config as it ships it, trimmed to the shape that matters:
+    /// the port is nested, and there are other keys called `port` around it.
+    const SQUAREMAP: &str = r#"# squaremap config
+settings:
+  web-address: "http://localhost:8080"
+  internal-webserver:
+    enabled: true
+    bind: 0.0.0.0
+    port: 8080
+    flush-json-immediately: false
+  other-service:
+    port: 9999
+world-settings:
+  default:
+    zoom:
+      default: 3
+"#;
+
+    #[test]
+    fn squaremaps_nested_port_is_read_by_its_path() {
+        assert_eq!(parse_port(SQUAREMAP, MapKind::Squaremap), Some(8080));
+    }
+
+    #[test]
+    fn a_different_key_called_port_is_not_squaremaps() {
+        // `other-service.port` sits at the same depth and would fool a flat
+        // scan; so would a `port` under world-settings.
+        let moved = SQUAREMAP.replace("    port: 8080", "    port: 8085");
+        assert_eq!(parse_port(&moved, MapKind::Squaremap), Some(8085));
+
+        let without = SQUAREMAP.replace("    port: 8080\n", "");
+        assert_eq!(
+            parse_port(&without, MapKind::Squaremap),
+            None,
+            "other-service.port must not be mistaken for it"
+        );
+    }
+
+    #[test]
+    fn rewriting_squaremaps_port_leaves_its_neighbours_alone() {
+        let updated = with_port(SQUAREMAP, MapKind::Squaremap, 8090).expect("the key is there");
+        assert_eq!(parse_port(&updated, MapKind::Squaremap), Some(8090));
+        // The other port, the indentation and every comment survive.
+        assert!(updated.contains("  other-service:\n    port: 9999"), "{updated}");
+        assert!(updated.contains("    port: 8090"), "{updated}");
+        assert!(updated.contains("# squaremap config"));
+        assert_eq!(updated.lines().count(), SQUAREMAP.lines().count());
+    }
+
+    #[test]
+    fn a_commented_out_squaremap_port_is_not_a_port() {
+        let commented = SQUAREMAP.replace("    port: 8080", "    #port: 8080");
+        assert_eq!(parse_port(&commented, MapKind::Squaremap), None);
+    }
+
+    #[test]
+    fn the_written_squaremap_config_is_read_back_by_the_same_parser() {
+        let written = squaremap_conf(8081);
+        assert_eq!(parse_port(&written, MapKind::Squaremap), Some(8081));
+        assert!(written.contains("enabled: true"));
+    }
+
+    #[tokio::test]
+    async fn squaremaps_config_is_written_once_and_never_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut instance = crate::db::models::Instance::fixture();
+        instance.server_type = ServerType::Fabric;
+        instance.path = dir.path().to_string_lossy().to_string();
+
+        assert!(ensure_squaremap_conf(&instance, 8080).await.unwrap());
+        assert_eq!(read_port(&instance, MapKind::Squaremap).await.unwrap(), Some(8080));
+
+        // A second install, or a user who moved the port, keeps their file.
+        let path = config_path(&instance, MapKind::Squaremap);
+        std::fs::write(&path, "settings:\n  internal-webserver:\n    port: 9001\n").unwrap();
+        assert!(!ensure_squaremap_conf(&instance, 8080).await.unwrap());
+        assert_eq!(read_port(&instance, MapKind::Squaremap).await.unwrap(), Some(9001));
     }
 
     #[test]

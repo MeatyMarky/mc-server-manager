@@ -262,12 +262,25 @@ by the id's own suffix — they are what people go looking for by name. `old_alp
 are dropped entirely: Mojang published no server jar before 1.2.5.
 
 ### The web map is somebody else's software
-BlueMap and Dynmap have spent years on chunk rendering and browser tiles; this app installs
-one and gets out of the way. Both come from Modrinth through the ordinary `ModSource` path
-(`map::install` resolves the slug, then reuses `resolve::plan` and `install_planned`), so
-there is no second downloader and no second allowlist. BlueMap runs on the three loaders and
-the Bukkit family, Dynmap on Paper/Purpur and Forge; vanilla is offered neither rather than
-being offered a failure.
+BlueMap, squaremap and Dynmap have spent years on chunk rendering and browser tiles; this app
+installs one and gets out of the way. All three come from Modrinth through the ordinary
+`ModSource` path (`map::install` resolves the slug, then reuses `resolve::plan` and
+`install_planned`), so there is no second downloader, no second allowlist, and a dependency
+like squaremap's Fabric API arrives the way it does for any other mod.
+
+`MapKind::supports` is the offer, and it is per project: BlueMap on the three loaders and the
+Bukkit family, squaremap on Fabric/NeoForge/Paper/Purpur, Dynmap on Paper/Purpur and Forge.
+Vanilla is offered none rather than a failure, and squaremap is not offered for Forge because
+its last Forge build is 1.2.0, for 1.20.1 alone. `summary()` is the line that makes the choice
+a choice — 3D and looks, speed and low disk, plugin integrations — and the create dialog's
+dropdown shows it beside each name.
+
+Everything that differs between them is a method on `MapKind`, so a fourth map is that list
+and nothing else: slug, label, default port, jar prefix, config path, render command, view
+URL. Two of those are worth remembering because they are *not* uniform — squaremap keeps its
+port at a nested YAML path (`settings.internal-webserver.port`, which a flat scan for `port`
+gets wrong), and it names worlds by dimension (`minecraft_overworld`, `minecraft:overworld`)
+rather than by `level-name`.
 
 The port is **read from the mod's own config**, never assumed: `map::config` parses BlueMap's
 HOCON `port:` and Dynmap's YAML `webserver-port:`, keeps every other line byte for byte on a

@@ -41,7 +41,7 @@ async fn instance_in(
             max_ram_mb: None,
             notes: None,
             color: None,
-            web_map: false,
+            web_map: None,
         },
     )
     .await
@@ -1152,12 +1152,15 @@ async fn both_map_mods_resolve_for_the_server_types_they_are_offered_on() {
     let state = state_in(dir.path()).await;
     let source = AnySource::build(&state, SourceId::Modrinth).await.unwrap();
 
-    // A version old enough that both projects have shipped for it for years.
+    // A version old enough that every project has shipped for it for years.
     let mc_version = "1.20.1";
 
     for (kind, server_type) in [
         (MapKind::BlueMap, ServerType::Fabric),
         (MapKind::BlueMap, ServerType::Paper),
+        (MapKind::Squaremap, ServerType::Fabric),
+        (MapKind::Squaremap, ServerType::Paper),
+        (MapKind::Squaremap, ServerType::NeoForge),
         (MapKind::Dynmap, ServerType::Paper),
         (MapKind::Dynmap, ServerType::Forge),
     ] {
@@ -1190,6 +1193,7 @@ async fn both_map_mods_resolve_for_the_server_types_they_are_offered_on() {
         assert!(
             file.file_name.to_ascii_lowercase().starts_with(match kind {
                 MapKind::BlueMap => "bluemap",
+                MapKind::Squaremap => "squaremap",
                 MapKind::Dynmap => "dynmap",
             }),
             "the jar is named after the project, which is how detection finds it: {}",
@@ -1201,4 +1205,68 @@ async fn both_map_mods_resolve_for_the_server_types_they_are_offered_on() {
     // And the defaults the app would pick are the ones just checked.
     assert_eq!(map::default_for(ServerType::Fabric), Some(MapKind::BlueMap));
     assert_eq!(map::default_for(ServerType::Paper), Some(MapKind::BlueMap));
+}
+
+/// Modrinth, live: squaremap still ships for the newest Minecraft this app
+/// installs, which is the claim that made it worth adding.
+///
+/// Its Fabric build also depends on Fabric API, and the ordinary resolver is
+/// what has to notice that — a map installed without its dependency is a server
+/// that will not boot.
+#[tokio::test]
+#[ignore = "hits the Modrinth API"]
+async fn squaremap_ships_for_the_newest_minecraft_and_pulls_fabric_api() {
+    use mc_server_manager_lib::map::MapKind;
+    use mc_server_manager_lib::mods::resolve;
+    use mc_server_manager_lib::mods::source::{Loader, ModSource, SourceId, VersionFilter};
+    use mc_server_manager_lib::mods::AnySource;
+
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_in(dir.path()).await;
+    let index = providers::index::refresh(&state.db, &state.http).await.unwrap();
+    let source = AnySource::build(&state, SourceId::Modrinth).await.unwrap();
+
+    let mc_version = "26.2";
+    let versions = source
+        .versions(
+            MapKind::Squaremap.project_slug(),
+            &VersionFilter {
+                loaders: vec!["fabric".into()],
+                game_versions: vec![mc_version.to_string()],
+            },
+        )
+        .await
+        .expect("squaremap versions");
+
+    let version = resolve::pick_version(&versions, Loader::Fabric, mc_version, &index)
+        .expect("squaremap publishes a Fabric build for 26.2");
+    println!(
+        "squaremap {} for Fabric {mc_version}: {}",
+        version.version_number,
+        version.primary_file().unwrap().file_name
+    );
+
+    // Fabric API is a required dependency, and the plan is where that has to
+    // show up — the map alone would be a server that does not boot.
+    let plan = resolve::plan(
+        &source,
+        version,
+        Loader::Fabric,
+        mc_version,
+        &index,
+        &Default::default(),
+    )
+    .await
+    .expect("a plan");
+
+    let titles: Vec<&str> = plan
+        .install
+        .iter()
+        .map(|planned| planned.project_title.as_str())
+        .collect();
+    println!("plan: {titles:?}");
+    assert!(
+        titles.iter().any(|title| title.to_ascii_lowercase().contains("fabric api")),
+        "Fabric API has to come with it: {titles:?}"
+    );
 }
