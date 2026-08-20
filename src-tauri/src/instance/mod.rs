@@ -28,6 +28,10 @@ pub struct CreateInstanceInput {
     pub max_ram_mb: Option<i64>,
     pub notes: Option<String>,
     pub color: Option<String>,
+    /// Whether this server should get a web map. The mod is installed after the
+    /// server itself, because it goes into a folder that does not exist yet.
+    #[serde(default)]
+    pub web_map: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

@@ -10,6 +10,7 @@ pub mod http;
 pub mod instance;
 pub mod java;
 pub mod logparse;
+pub mod map;
 pub mod mcversion;
 pub mod net;
 pub mod providers;
@@ -196,6 +197,10 @@ pub fn run() {
             commands::setup::eula_get,
             commands::setup::eula_set,
             commands::setup::read_installer_log,
+            commands::map::map_status,
+            commands::map::map_kinds_for,
+            commands::map::map_install,
+            commands::map::map_uninstall,
             commands::net::network_view,
             commands::net::network_public_ip,
             commands::net::network_external_check,

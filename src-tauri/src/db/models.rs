@@ -151,11 +151,62 @@ pub struct Instance {
     pub process_start_time: Option<i64>,
     pub installed_artifact_url: Option<String>,
     pub installed_at: Option<String>,
+    /// The web map this instance is meant to have, as a `MapKind`. The port is
+    /// not stored: it is read from the map mod's own config, which the user is
+    /// free to edit.
+    pub map_kind: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 impl Instance {
+    /// A row with every field set to something harmless, for tests that care
+    /// about one or two of them. Cheaper than thirty lines of `None` per test,
+    /// and it keeps them compiling when a column is added.
+    #[cfg(test)]
+    pub fn fixture() -> Self {
+        Self {
+            id: 1,
+            uuid: "u1".into(),
+            name: "survival".into(),
+            path: "Z:/survival".into(),
+            server_type: ServerType::Paper,
+            mc_version: "1.21.4".into(),
+            loader_version: None,
+            launch_kind: LaunchKind::Jar,
+            launch_target: None,
+            java_path: None,
+            java_major: None,
+            jvm_args: "[]".into(),
+            server_args: "[]".into(),
+            min_ram_mb: 1024,
+            max_ram_mb: 4096,
+            eula_accepted: false,
+            eula_accepted_at: None,
+            auto_start: false,
+            auto_restart: false,
+            restart_max: 3,
+            restart_window_s: 600,
+            stop_timeout_s: 60,
+            rcon_enabled: false,
+            rcon_port: None,
+            rcon_password: None,
+            color: None,
+            notes: None,
+            last_status: None,
+            last_exit_code: None,
+            last_started_at: None,
+            last_stopped_at: None,
+            pid: None,
+            process_start_time: None,
+            installed_artifact_url: None,
+            installed_at: None,
+            map_kind: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
     pub fn path_buf(&self) -> std::path::PathBuf {
         std::path::PathBuf::from(&self.path)
     }
@@ -411,6 +462,7 @@ mod tests {
             process_start_time: None,
             installed_artifact_url: None,
             installed_at: None,
+            map_kind: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }

@@ -10,6 +10,7 @@ pub mod packs;
 pub mod players;
 pub mod runtimes;
 pub mod java;
+pub mod map;
 pub mod mods;
 pub mod net;
 pub mod process;

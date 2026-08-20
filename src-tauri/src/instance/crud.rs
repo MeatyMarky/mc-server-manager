@@ -95,12 +95,21 @@ pub async fn create(state: &AppState, input: CreateInstanceInput) -> AppResult<I
     let min_ram = input.min_ram_mb.unwrap_or(1024).max(512);
     let max_ram = input.max_ram_mb.unwrap_or(4096).max(min_ram);
 
+    // A web map is a wish at this point, not a mod: the folder it installs into
+    // does not exist until the server is installed, so the choice is recorded
+    // and acted on when that finishes.
+    let map_kind = input
+        .web_map
+        .then(|| crate::map::default_for(input.server_type))
+        .flatten()
+        .map(|kind| kind.as_str().to_string());
+
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO instances (
             uuid, name, path, server_type, mc_version, loader_version,
             launch_kind, launch_target, jvm_args, server_args,
-            min_ram_mb, max_ram_mb, notes, color, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            min_ram_mb, max_ram_mb, notes, color, map_kind, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING id",
     )
     .bind(&uuid)
@@ -117,6 +126,7 @@ pub async fn create(state: &AppState, input: CreateInstanceInput) -> AppResult<I
     .bind(max_ram)
     .bind(&input.notes)
     .bind(&input.color)
+    .bind(&map_kind)
     .bind(&now)
     .bind(&now)
     .fetch_one(&state.db)
@@ -598,6 +608,7 @@ mod tests {
             max_ram_mb: None,
             notes: None,
             color: None,
+            web_map: false,
         }
     }
 

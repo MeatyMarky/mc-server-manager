@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
 import { JavaPlanNotice } from "@/features/setup/ManagedRuntimes";
+import { useQuery } from "@tanstack/react-query";
+
 import { useProviderBuilds } from "@/features/setup/queries";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { SERVER_TYPES, SERVER_TYPE_LABEL } from "@/lib/status";
@@ -41,6 +43,16 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
   const [mcVersion, setMcVersion] = useState("");
   const [build, setBuild] = useState("");
   const [maxRam, setMaxRam] = useState(4096);
+  const [webMap, setWebMap] = useState(false);
+
+  // Which maps this server type can run. Vanilla loads neither, so the offer
+  // disappears rather than being shown and then refused.
+  const mapKinds = useQuery({
+    queryKey: ["map-kinds", serverType],
+    queryFn: () => ipc.mapKindsFor(serverType),
+  });
+  const mapName = mapKinds.data?.[0] === "blue_map" ? "BlueMap" : "Dynmap";
+  const mapAvailable = (mapKinds.data ?? []).length > 0;
 
   // Builds depend on both choices, so the dropdown only has something to show
   // once a version is picked. Vanilla has none at all.
@@ -96,6 +108,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
     setBuild("");
     setServerType("paper");
     setMaxRam(4096);
+    setWebMap(false);
   }
 
   async function submit(event: React.FormEvent) {
@@ -119,6 +132,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
         maxRamMb: maxRam,
         notes: null,
         color: null,
+        webMap: webMap && mapAvailable,
       });
       reset();
       onOpenChange(false);
@@ -259,6 +273,24 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
               </p>
             ) : null}
           </div>
+
+          {mapAvailable ? (
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                checked={webMap}
+                onChange={(event) => setWebMap(event.target.checked)}
+              />
+              <span>
+                Web map
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Installs {mapName} after the server files, on a port nothing else is using. It
+                  renders the world in a browser, and gets its own tab here.
+                </span>
+              </span>
+            </label>
+          ) : null}
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

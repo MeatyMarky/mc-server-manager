@@ -8,6 +8,7 @@ import {
   Globe,
   HelpCircle,
   Loader2,
+  Map as MapIcon,
   Network,
   Router,
   ShieldCheck,
@@ -200,6 +201,46 @@ export function NetworkingTab({ instance }: { instance: InstanceView }) {
             {external ? <ExternalResult result={external} /> : null}
           </div>
         </section>
+
+        {data.map ? (
+          <section className="grid gap-3 border-t border-border pt-6">
+            <header>
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <MapIcon className="size-4" aria-hidden />
+                The web map
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {data.map.label} serves the map on port {data.map.port} — a second port, and a
+                second thing to forward. Forwarding the game port alone leaves the map
+                unreachable from outside.
+              </p>
+            </header>
+
+            <ul className="grid gap-2">
+              {data.map.addresses.map((entry) => (
+                <li
+                  key={`map-${entry.interface}-${entry.address}`}
+                  className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2"
+                >
+                  <Badge>{entry.network ?? KIND_LABEL[entry.kind]}</Badge>
+                  <code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                    http://{entry.address}:{data.map!.port}
+                  </code>
+                  <CopyButton value={`http://${entry.address}:${data.map!.port}`} />
+                  <span className="w-full text-xs text-muted-foreground sm:w-auto sm:flex-1">
+                    {entry.audience}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <p className="text-xs text-muted-foreground">
+              {data.map.local === "listening"
+                ? "Something is listening on the map's port."
+                : "Nothing is listening on the map's port — normal while the server is stopped."}
+            </p>
+          </section>
+        ) : null}
 
         <section className="grid gap-3 border-t border-border pt-6">
           <header>

@@ -41,6 +41,7 @@ async fn instance_in(
             max_ram_mb: None,
             notes: None,
             color: None,
+            web_map: false,
         },
     )
     .await
@@ -1132,4 +1133,72 @@ async fn a_managed_jdk_downloads_unpacks_and_reports_its_version() {
     managed::remove(&state, 17).await.expect("remove it again");
     assert!(!expected_dir.exists());
     assert!(managed::list(&state).await.unwrap().is_empty());
+}
+
+/// Modrinth, live: both map projects publish a build this app would install for
+/// the server types it offers them on.
+///
+/// The slugs and the loader filters are the whole integration — if either drifts
+/// the create dialog's checkbox silently produces a server with no map, and
+/// nothing else in the suite would notice.
+#[tokio::test]
+#[ignore = "hits the Modrinth API"]
+async fn both_map_mods_resolve_for_the_server_types_they_are_offered_on() {
+    use mc_server_manager_lib::map::{self, MapKind};
+    use mc_server_manager_lib::mods::source::{ModSource, SourceId, VersionFilter};
+    use mc_server_manager_lib::mods::AnySource;
+
+    let dir = tempfile::tempdir().unwrap();
+    let state = state_in(dir.path()).await;
+    let source = AnySource::build(&state, SourceId::Modrinth).await.unwrap();
+
+    // A version old enough that both projects have shipped for it for years.
+    let mc_version = "1.20.1";
+
+    for (kind, server_type) in [
+        (MapKind::BlueMap, ServerType::Fabric),
+        (MapKind::BlueMap, ServerType::Paper),
+        (MapKind::Dynmap, ServerType::Paper),
+        (MapKind::Dynmap, ServerType::Forge),
+    ] {
+        assert!(
+            kind.supports(server_type),
+            "{:?} is offered for {server_type:?}",
+            kind
+        );
+        let loader = mc_server_manager_lib::mods::loader_of(server_type, "smoke").unwrap();
+
+        let versions = source
+            .versions(
+                kind.project_slug(),
+                &VersionFilter {
+                    loaders: loader.accepted().iter().map(|l| l.to_string()).collect(),
+                    game_versions: vec![mc_version.to_string()],
+                },
+            )
+            .await
+            .unwrap_or_else(|err| panic!("{} versions for {loader:?}: {err}", kind.label()));
+
+        assert!(
+            !versions.is_empty(),
+            "{} publishes nothing for {loader:?} on {mc_version}",
+            kind.label()
+        );
+        let file = versions[0]
+            .primary_file()
+            .unwrap_or_else(|| panic!("{} has a downloadable file", kind.label()));
+        assert!(
+            file.file_name.to_ascii_lowercase().starts_with(match kind {
+                MapKind::BlueMap => "bluemap",
+                MapKind::Dynmap => "dynmap",
+            }),
+            "the jar is named after the project, which is how detection finds it: {}",
+            file.file_name
+        );
+        println!("{} for {loader:?}: {}", kind.label(), file.file_name);
+    }
+
+    // And the defaults the app would pick are the ones just checked.
+    assert_eq!(map::default_for(ServerType::Fabric), Some(MapKind::BlueMap));
+    assert_eq!(map::default_for(ServerType::Paper), Some(MapKind::BlueMap));
 }

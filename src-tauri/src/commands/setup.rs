@@ -78,6 +78,33 @@ pub async fn install_server(
         )
         .await;
 
+        // A web map asked for at create time is installed now, because now is
+        // when the folder it goes into exists. A failure here is reported on
+        // its own rather than failing the server install, which worked.
+        if result.is_ok() {
+            if let Ok(row) = instance::get(&state.db, id).await {
+                if let Some(kind) = crate::map::wanted(&row) {
+                    if crate::map::detect(&row).ok().flatten().is_none() {
+                        let map_cancel = tokio_util::sync::CancellationToken::new();
+                        match crate::map::install(&state, id, kind, &map_cancel, |_, _, _| {}).await
+                        {
+                            Ok(message) => tracing::info!(
+                                instance = %row.name,
+                                instance_id = id,
+                                "{message}"
+                            ),
+                            Err(err) => tracing::warn!(
+                                instance = %row.name,
+                                instance_id = id,
+                                error = %err,
+                                "the web map could not be installed; the server itself is fine"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+
         // install() already recorded the outcome on the instance row.
         let done = match result {
             Ok(_) => events::TaskDoneEvent {

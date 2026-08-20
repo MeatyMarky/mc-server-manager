@@ -33,12 +33,36 @@ pub struct NetworkView {
     pub local: LocalPort,
     /// Manual port-forwarding steps, written for this machine's router.
     pub manual_steps: Vec<String>,
+    /// The web map's port and addresses, when one is installed. A map is a
+    /// second thing to share, on a second port, and somebody who forwards
+    /// 25565 and stops has forwarded half of it.
+    pub map: Option<MapAddresses>,
+}
+
+/// The same addresses, for the map's port.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub struct MapAddresses {
+    /// BlueMap or Dynmap, as the tab names it.
+    pub label: String,
+    pub port: u16,
+    pub addresses: Vec<NetAddress>,
+    /// What this machine can see about the map's own port.
+    pub local: LocalPort,
 }
 
 #[tauri::command]
 pub async fn network_view(state: State<'_, AppState>, id: i64) -> AppResult<NetworkView> {
     let row = instance::get(&state.db, id).await?;
     let path = row.path_buf();
+
+    // Read before the blocking section, because it reads the map's config.
+    let map_kind = crate::map::detect(&row)?.map(|found| found.kind);
+    let map_port = match map_kind {
+        Some(kind) => crate::map::config::read_port(&row, kind).await?,
+        None => None,
+    };
 
     // Reading the properties file is blocking work, and so is walking the
     // machine's adapter list.
@@ -69,6 +93,15 @@ pub async fn network_view(state: State<'_, AppState>, id: i64) -> AppResult<Netw
                 .map(|value| value == "true")
                 .unwrap_or(true),
             local: net::local_port_state(configured),
+            map: map_kind.zip(map_port).map(|(kind, port)| {
+                let (addresses, _) = net::addresses(port);
+                MapAddresses {
+                    label: kind.label().to_string(),
+                    local: net::local_port_state(port),
+                    addresses,
+                    port,
+                }
+            }),
             }
     })
     .await

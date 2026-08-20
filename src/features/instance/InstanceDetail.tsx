@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Copy, FolderOpen, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
@@ -22,6 +23,7 @@ import type { InstanceView } from "@/lib/types";
 import { ConfigTab } from "@/features/config/ConfigTab";
 import { ConsoleTab } from "@/features/console/ConsoleTab";
 import { ModsTab } from "@/features/mods/ModsTab";
+import { MapTab } from "@/features/map/MapTab";
 import { NetworkingTab } from "@/features/network/NetworkingTab";
 import { PlayersTab } from "@/features/players/PlayersTab";
 import { BackupsTab } from "@/features/backups/BackupsTab";
@@ -34,6 +36,7 @@ import { SettingsTab } from "./tabs/SettingsTab";
 const TABS = [
   { value: "console", label: "Console" },
   { value: "mods", label: "Mods" },
+  { value: "map", label: "Map" },
   { value: "config", label: "Config" },
   { value: "players", label: "Players" },
   { value: "worlds", label: "Worlds" },
@@ -43,6 +46,13 @@ const TABS = [
 ] as const;
 
 export function InstanceDetail({ instance }: { instance: InstanceView }) {
+  // A Map tab with no map is a tab that only ever says "nothing here", so it
+  // exists only once a map mod does.
+  const map = useQuery({
+    queryKey: ["map", instance.id, instance.status],
+    queryFn: () => ipc.mapStatus(instance.id),
+  });
+  const hasMap = Boolean(map.data?.kind);
   const [renaming, setRenaming] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -115,7 +125,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
 
       <Tabs defaultValue="console" className="mt-6 flex min-h-0 flex-1 flex-col">
         <TabsList>
-          {TABS.map((tab) => (
+          {TABS.filter((tab) => tab.value !== "map" || hasMap).map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               {tab.label}
             </TabsTrigger>
@@ -142,6 +152,17 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
             />
           ) : (
             <ModsTab instance={instance} />
+          )}
+        </TabsContent>
+        <TabsContent value="map" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title="Map"
+              phase={11}
+              description="Locate the instance folder to see its map."
+            />
+          ) : (
+            <MapTab instance={instance} />
           )}
         </TabsContent>
         <TabsContent value="config" className="min-h-0">

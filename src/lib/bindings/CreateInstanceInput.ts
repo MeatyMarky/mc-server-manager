@@ -6,4 +6,9 @@ export type CreateInstanceInput = { name: string,
  * Absolute folder for this instance. Instances are not confined to a shared
  * root; each one records its own path.
  */
-path: string, serverType: ServerType, mcVersion: string, loaderVersion: string | null, minRamMb: number | null, maxRamMb: number | null, notes: string | null, color: string | null, };
+path: string, serverType: ServerType, mcVersion: string, loaderVersion: string | null, minRamMb: number | null, maxRamMb: number | null, notes: string | null, color: string | null, 
+/**
+ * Whether this server should get a web map. The mod is installed after the
+ * server itself, because it goes into a folder that does not exist yet.
+ */
+webMap: boolean, };

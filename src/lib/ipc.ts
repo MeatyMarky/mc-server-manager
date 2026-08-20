@@ -25,7 +25,9 @@ import type {
   JavaRuntime,
   JavaStatus,
   ScanInfo,
+  MapKind,
   MappingResult,
+  MapStatus,
   PublicAddress,
   NetworkView,
   Reachability,
@@ -157,6 +159,11 @@ export const ipc = {
 
   javaList: () => invoke<JavaRuntime[]>("java_list"),
   javaScanInfo: () => invoke<ScanInfo>("java_scan_info"),
+
+  mapStatus: (id: number) => invoke<MapStatus>("map_status", { id }),
+  mapKindsFor: (serverType: ServerType) => invoke<MapKind[]>("map_kinds_for", { serverType }),
+  mapInstall: (id: number, kind: MapKind) => invoke<string>("map_install", { id, kind }),
+  mapUninstall: (id: number) => invoke<void>("map_uninstall", { id }),
 
   networkView: (id: number) => invoke<NetworkView>("network_view", { id }),
   networkPublicIp: (id: number) => invoke<PublicAddress | null>("network_public_ip", { id }),

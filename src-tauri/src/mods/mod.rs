@@ -900,6 +900,7 @@ mod tests {
             process_start_time: None,
             installed_artifact_url: None,
             installed_at: None,
+            map_kind: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
         }

@@ -261,6 +261,27 @@ because Paper's version list is not Mojang's. The manifest calls every non-relea
 by the id's own suffix — they are what people go looking for by name. `old_alpha`/`old_beta`
 are dropped entirely: Mojang published no server jar before 1.2.5.
 
+### The web map is somebody else's software
+BlueMap and Dynmap have spent years on chunk rendering and browser tiles; this app installs
+one and gets out of the way. Both come from Modrinth through the ordinary `ModSource` path
+(`map::install` resolves the slug, then reuses `resolve::plan` and `install_planned`), so
+there is no second downloader and no second allowlist. BlueMap runs on the three loaders and
+the Bukkit family, Dynmap on Paper/Purpur and Forge; vanilla is offered neither rather than
+being offered a failure.
+
+The port is **read from the mod's own config**, never assumed: `map::config` parses BlueMap's
+HOCON `port:` and Dynmap's YAML `webserver-port:`, keeps every other line byte for byte on a
+write, and treats a commented-out key as absent. A user who moves the port keeps their map.
+The config does not exist until the server's first start, so "installed but no port yet" is a
+normal state with its own sentence rather than an error.
+
+A map is a second port, so `map::conflict_for` checks a candidate against every other
+instance's game *and* map port, and the Networking tab lists the map's addresses beside the
+game's — somebody who forwards 25565 and stops has forwarded half of what they meant to.
+The Map tab embeds the local URL in a sandboxed iframe (`frame-src` allows loopback only) and
+says which of the two "nothing to show" states applies: the server is stopped, or the config
+has not been written yet.
+
 ### Addresses are labelled by block, never by adapter name
 Adapter names are localised, renamed and driver-specific; the address block is the stable
 part. 25.x is Hamachi, 26.x is Radmin, 100.64–100.127 is Tailscale (shared with carrier NAT,
@@ -513,8 +534,9 @@ Do not hand-edit it.
 - Dark mode is the default; light mode available; theme persisted in `settings`.
 - Sidebar lists instances with a status dot: stopped / starting / running / stopping /
   crashed / unmanaged / missing.
-- Instance detail has exactly these tabs: Console, Mods, Config, Players, Worlds, Backups,
-  Networking, Settings. App-wide options live in their own Settings screen (gear in the
+- Instance detail has exactly these tabs: Console, Mods, Map, Config, Players, Worlds,
+  Backups, Networking, Settings. Map appears only when a map mod is installed — a tab whose
+  only content is "nothing here" is a tab worth not having. App-wide options live in their own Settings screen (gear in the
   titlebar), never in an instance's tab — an instance tab is unreachable until an instance
   exists, which is exactly when the CurseForge key and the Java list are wanted.
 - Everything is keyboard-navigable. The console has an autoscroll toggle, search, and copy.

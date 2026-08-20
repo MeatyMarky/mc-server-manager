@@ -342,6 +342,8 @@ where
             ),
             notes: Some(format!("Installed from the {} modpack", detail.name)),
             color: None,
+            // A pack brings its own mod list; a map is asked for separately.
+            web_map: false,
         },
     )
     .await?;
