@@ -288,6 +288,16 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
                   Installs {mapName} after the server files, on a port nothing else is using. It
                   renders the world in a browser, and gets its own tab here.
                 </span>
+                {mapName === "BlueMap" ? (
+                  // BlueMap will not render without this, and it is a download
+                  // made on the user's behalf: saying it here is what makes
+                  // ticking the box the permission for it.
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    BlueMap downloads a Minecraft client jar from Mojang the first time the
+                    server starts, to take block textures out of it. Ticking this says you own
+                    Minecraft: Java Edition and accept Mojang's EULA.
+                  </span>
+                ) : null}
               </span>
             </label>
           ) : null}

@@ -275,12 +275,34 @@ write, and treats a commented-out key as absent. A user who moves the port keeps
 The config does not exist until the server's first start, so "installed but no port yet" is a
 normal state with its own sentence rather than an error.
 
+BlueMap's configs are written **before** its first start, not edited after it. Two reasons:
+`accept-download` defaults to false and BlueMap stops on the first start without it ("BlueMap
+is missing important resources!"), and a port set after that start only takes effect on the
+next one. BlueMap writes a config only where none exists, so pre-writing settles both — and
+neither file is ever overwritten, so a user who turns the download back off keeps that answer;
+the Map tab then offers to turn it on again, on a click. `accept-download: true` is a
+statement made on the user's behalf, because BlueMap downloads a Minecraft client jar from
+Mojang for its textures — so the create dialog's checkbox says exactly that, and the tick is
+the permission. Dynmap has no equivalent gate.
+
 A map is a second port, so `map::conflict_for` checks a candidate against every other
 instance's game *and* map port, and the Networking tab lists the map's addresses beside the
 game's — somebody who forwards 25565 and stops has forwarded half of what they meant to.
 The Map tab embeds the local URL in a sandboxed iframe (`frame-src` allows loopback only) and
 says which of the two "nothing to show" states applies: the server is stopped, or the config
 has not been written yet.
+
+### Stopping a mapped server is a sequence, and every line of it is echoed
+A map mod is a web server and a render thread pool inside the same JVM, so a stop gets
+`MAP_STOP_GRACE` (45 s) on top of the configured timeout, and `stop_sequence` sends
+`save-all flush` — then `bluemap stop` for BlueMap — before `stop` itself. The flush comes
+first on purpose: a map's shutdown runs alongside the server's, BlueMap has been seen to throw
+inside its own (an NPE on `pluginState` with a player online), and a flush that already
+happened costs nothing. Everything sent on the way down is echoed into the console as
+`> command`, because a stop that produced no "Stopping the server" line left nothing to say
+whether the command was ever sent. A `stop` that cannot be delivered at all — the stdin writer
+task is gone — escalates immediately with a sentence, rather than waiting out a timeout it
+cannot survive, and `finish_stop` logs the stage reached at info.
 
 ### Addresses are labelled by block, never by adapter name
 Adapter names are localised, renamed and driver-specific; the address block is the stable

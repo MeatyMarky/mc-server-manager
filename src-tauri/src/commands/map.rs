@@ -84,6 +84,18 @@ pub async fn map_install(
     Ok(returned)
 }
 
+/// Lets BlueMap download the resources it renders with.
+///
+/// Its own default is to refuse, because the download is a Minecraft client jar
+/// from Mojang: turning it on says the user owns Minecraft: Java Edition and
+/// accepts Mojang's EULA. So it happens on a click, next to a sentence saying
+/// exactly that, and never on this app's own initiative.
+#[tauri::command]
+pub async fn map_accept_download(state: State<'_, AppState>, id: i64) -> AppResult<bool> {
+    let row = instance::get(&state.db, id).await?;
+    crate::map::config::accept_download(&row).await
+}
+
 /// Removes the map mod again, and forgets the intent to have one.
 #[tauri::command]
 pub async fn map_uninstall(state: State<'_, AppState>, id: i64) -> AppResult<()> {

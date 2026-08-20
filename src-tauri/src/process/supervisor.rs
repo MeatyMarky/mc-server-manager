@@ -34,6 +34,34 @@ const BATCH_MAX_LINES: usize = 250;
 /// How often the stop sequence re-checks whether the process is gone.
 const EXIT_POLL: Duration = Duration::from_millis(200);
 /// Grace given to SIGTERM before the hard kill.
+/// What is sent before "stop" when a map mod is installed.
+///
+/// The world is flushed first: a map mod's shutdown runs alongside the server's,
+/// and BlueMap has been seen to throw inside its own (an NPE on `pluginState`
+/// with a player online). A flush that has already happened costs nothing, and
+/// it means no version of that failure can cost anybody their last few minutes.
+///
+/// BlueMap is then asked to stop itself, so its render threads and web server
+/// come down before the server's shutdown rather than during it. Dynmap has no
+/// console command worth sending, so it gets the flush alone.
+fn stop_sequence(kind: Option<crate::map::MapKind>) -> Vec<&'static str> {
+    match kind {
+        None => Vec::new(),
+        Some(crate::map::MapKind::BlueMap) => vec!["save-all flush", "bluemap stop"],
+        Some(crate::map::MapKind::Dynmap) => vec!["save-all flush"],
+    }
+}
+
+/// Extra time a server with a map mod gets before the stop escalates.
+///
+/// BlueMap flushes render state and shuts a web server down inside the same
+/// JVM, and a server that would stop in ten seconds on its own can take most of
+/// a minute with one installed.
+const MAP_STOP_GRACE: Duration = Duration::from_secs(45);
+
+/// How long the map is given to put itself down before the server is stopped.
+const MAP_QUIESCE: Duration = Duration::from_secs(2);
+
 const TERMINATE_GRACE: Duration = Duration::from_secs(10);
 
 /// One running server.
@@ -1076,7 +1104,13 @@ pub async fn command_history(state: &AppState, id: i64) -> AppResult<Vec<String>
 /// it had to go.
 pub async fn stop(app: &AppHandle, state: &AppState, id: i64) -> AppResult<StopStage> {
     let instance = instance::get(&state.db, id).await?;
-    let timeout = Duration::from_secs(instance.stop_timeout_s.clamp(5, 3_600) as u64);
+
+    // A map mod is a web server and a pool of render threads inside the same
+    // JVM, and BlueMap flushes its render state on the way out. The configured
+    // timeout is what a plain server needs; this is what a mapped one does.
+    let map = crate::map::detect(&instance)?;
+    let extra = if map.is_some() { MAP_STOP_GRACE } else { Duration::ZERO };
+    let timeout = Duration::from_secs(instance.stop_timeout_s.clamp(5, 3_600) as u64) + extra;
 
     let running = state
         .supervisor
@@ -1094,7 +1128,55 @@ pub async fn stop(app: &AppHandle, state: &AppState, id: i64) -> AppResult<StopS
     state.set_status(&instance.uuid, InstanceStatus::Stopping);
     events::instance_status(app, &instance.uuid, InstanceStatus::Stopping, None);
 
-    let _ = stdin.send("stop\n".to_string());
+    // Everything sent on the way down goes into the console the same way a
+    // typed command does. A stop that produced no "Stopping the server" line
+    // left nothing to say whether the command was ever sent, which is half the
+    // question when a stop does not work.
+    let say = |command: &str| {
+        if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
+            buffer.push_system(&format!("> {command}"));
+        }
+        stdin.send(format!("{command}\n")).is_ok()
+    };
+
+    let before_stop = stop_sequence(map.as_ref().map(|found| found.kind));
+    if !before_stop.is_empty() {
+        for command in &before_stop {
+            say(command);
+        }
+        tokio::time::sleep(MAP_QUIESCE).await;
+    }
+
+    if !say("stop") {
+        // The writer task is gone, so nothing typed will ever arrive. Say so
+        // rather than waiting out a timeout that cannot succeed.
+        tracing::warn!(
+            instance = %instance.name,
+            instance_id = instance.id,
+            "the server is no longer accepting console input; terminating instead"
+        );
+        if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
+            buffer.push_system(
+                "This server is not reading its console any more, so \"stop\" could not be sent.",
+            );
+        }
+        super::signal::request_terminate(pid);
+        if wait_for_exit(&exited, TERMINATE_GRACE).await {
+            return finish_stop(app, state, &instance, StopStage::Terminated).await;
+        }
+        super::signal::force_kill(pid);
+        wait_for_exit(&exited, TERMINATE_GRACE).await;
+        return finish_stop(app, state, &instance, StopStage::Killed).await;
+    }
+
+    tracing::info!(
+        instance = %instance.name,
+        instance_id = instance.id,
+        timeout_s = timeout.as_secs(),
+        map = map.as_ref().map(|found| found.kind.label()).unwrap_or("none"),
+        "sent stop on stdin"
+    );
+
     if wait_for_exit(&exited, timeout).await {
         return finish_stop(app, state, &instance, StopStage::Graceful).await;
     }
@@ -1161,6 +1243,15 @@ async fn finish_stop(
     instance: &Instance,
     stage: StopStage,
 ) -> AppResult<StopStage> {
+    // Which stage a stop reached is the difference between "it stopped" and "it
+    // was killed", and reading it out of the console afterwards is not the same
+    // as having it in the log.
+    tracing::info!(
+        instance = %instance.name,
+        instance_id = instance.id,
+        stage = stage.as_str(),
+        "stop finished"
+    );
     state.set_status(&instance.uuid, InstanceStatus::Stopped);
     events::instance_status(app, &instance.uuid, InstanceStatus::Stopped, None);
     events::instances_changed(app);
@@ -1539,6 +1630,35 @@ mod tests {
         let message = err.user_message();
         assert!(message.contains("Java 8"), "{message}");
         assert!(message.contains("Java 17"), "{message}");
+    }
+
+    #[test]
+    fn a_plain_server_is_stopped_with_nothing_but_stop() {
+        assert!(stop_sequence(None).is_empty());
+    }
+
+    #[test]
+    fn a_mapped_server_flushes_the_world_before_anything_else() {
+        // Order matters: the flush has to precede the map's own shutdown, which
+        // is where the failure that prompted this happens.
+        let bluemap = stop_sequence(Some(crate::map::MapKind::BlueMap));
+        assert_eq!(bluemap, vec!["save-all flush", "bluemap stop"]);
+        assert_eq!(bluemap[0], "save-all flush");
+
+        // Dynmap has no console command worth sending; the flush still applies.
+        assert_eq!(
+            stop_sequence(Some(crate::map::MapKind::Dynmap)),
+            vec!["save-all flush"]
+        );
+    }
+
+    #[test]
+    fn nothing_in_the_stop_sequence_is_the_stop_itself() {
+        // `stop` is sent separately, and its failure is what escalates. A copy
+        // in here would stop the server before the map had come down.
+        for kind in [None, Some(crate::map::MapKind::BlueMap), Some(crate::map::MapKind::Dynmap)] {
+            assert!(!stop_sequence(kind).contains(&"stop"), "{kind:?}");
+        }
     }
 
     #[tokio::test]

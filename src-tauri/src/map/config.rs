@@ -41,6 +41,69 @@ fn port_key(kind: MapKind) -> &'static str {
     }
 }
 
+/// BlueMap's second config, holding the one setting it refuses to start without.
+pub fn core_config_path(instance: &Instance) -> PathBuf {
+    instance
+        .path_buf()
+        .join("config")
+        .join("bluemap")
+        .join("core.conf")
+}
+
+/// The file BlueMap needs before it will render anything.
+///
+/// `accept-download: false` is the default, and with it BlueMap stops on the
+/// first start with "BlueMap is missing important resources!". Setting it true
+/// is a statement on the user's behalf — that they own Minecraft: Java Edition
+/// and accept Mojang's EULA — because BlueMap then downloads a Minecraft client
+/// jar from Mojang to take block textures out of it. That is why the create
+/// dialog's checkbox says so, and why this app writes the file only for a map
+/// it was asked to install.
+///
+/// Written whole rather than edited, because it is written before BlueMap's
+/// first start: BlueMap creates the file only when it is missing and fills in
+/// every key it does not find, so the three below are enough.
+pub const CORE_CONF: &str = "\
+## Written by Minecraft Server Manager when BlueMap was installed.
+##
+## accept-download tells BlueMap it may download a Minecraft client jar from
+## Mojang and take the block textures out of it. It was set to true because the
+## \"Web map\" box was ticked when this server was created, which says the same
+## thing: that you own Minecraft: Java Edition and accept Mojang's EULA.
+accept-download: true
+
+## Threads BlueMap renders with. Left at BlueMap's own defaults.
+#render-thread-count: 1
+";
+
+/// Whether BlueMap has been told it may download its resources.
+pub fn accepts_download(contents: &str) -> Option<bool> {
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') || trimmed.starts_with("//") {
+            continue;
+        }
+        let Some((name, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        if name.trim().trim_matches('"') != "accept-download" {
+            continue;
+        }
+        let value = value
+            .split(['#', '/'])
+            .next()
+            .unwrap_or(value)
+            .trim()
+            .trim_matches('"');
+        return match value {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        };
+    }
+    None
+}
+
 /// The port from a config file's text, or `None` when it does not say.
 ///
 /// Both formats are `key: value` at heart. Comments start with `#` and, in
@@ -138,6 +201,105 @@ pub async fn write_port(instance: &Instance, kind: MapKind, port: u16) -> AppRes
     };
 
     write_atomic(&path, &updated).await?;
+    Ok(true)
+}
+
+/// BlueMap's webserver config, written whole for the same reason as the core
+/// one: the port has to be settled before BlueMap's first start, and the file
+/// does not exist until then.
+pub fn webserver_conf(port: u16) -> String {
+    format!(
+        "\
+## Written by Minecraft Server Manager when BlueMap was installed.
+## The port was chosen because nothing else on this computer was using it.
+enabled: true
+port: {port}
+"
+    )
+}
+
+/// Writes BlueMap's webserver config, if it is not there already.
+pub async fn ensure_webserver_conf(instance: &Instance, port: u16) -> AppResult<bool> {
+    let path = config_path(instance, MapKind::BlueMap);
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .ctx("create the BlueMap config folder", parent)?;
+    }
+    write_atomic(&path, &webserver_conf(port)).await?;
+    Ok(true)
+}
+
+/// Writes BlueMap's core config, if it is not there already.
+///
+/// Never overwrites: a file that exists is the user's, including one where they
+/// have set `accept-download` back to false. Returns whether it wrote.
+pub async fn ensure_core_conf(instance: &Instance) -> AppResult<bool> {
+    let path = core_config_path(instance);
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .ctx("create the BlueMap config folder", parent)?;
+    }
+    write_atomic(&path, CORE_CONF).await?;
+    Ok(true)
+}
+
+/// Whether BlueMap will refuse to start for want of the download flag.
+///
+/// Read rather than assumed, like the port: the user may have turned it off on
+/// purpose, and this is what turns "it just does not work" into a sentence.
+pub async fn download_blocked(instance: &Instance) -> AppResult<bool> {
+    let path = core_config_path(instance);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(contents) => Ok(accepts_download(&contents) == Some(false)),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Turns the download flag on in a config BlueMap already wrote.
+///
+/// The line-targeted edit again: everything else in the file is the user's.
+/// Only ever called from an explicit click, because of what the setting means.
+pub async fn accept_download(instance: &Instance) -> AppResult<bool> {
+    let path = core_config_path(instance);
+    let Ok(contents) = tokio::fs::read_to_string(&path).await else {
+        // Nothing written yet, so the whole file can be.
+        return ensure_core_conf(instance).await;
+    };
+
+    let mut found = false;
+    let mut out = String::with_capacity(contents.len());
+    for line in contents.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\r', '\n']);
+        let ending = &line[body.len()..];
+        let trimmed = body.trim_start();
+        if !found && !trimmed.starts_with('#') && !trimmed.starts_with("//") {
+            if let Some((name, _)) = trimmed.split_once(':') {
+                if name.trim().trim_matches('"') == "accept-download" {
+                    let indent = &body[..body.len() - trimmed.len()];
+                    out.push_str(indent);
+                    out.push_str(name);
+                    out.push_str(": true");
+                    out.push_str(ending);
+                    found = true;
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+    }
+
+    if !found {
+        return Ok(false);
+    }
+    write_atomic(&path, &out).await?;
     Ok(true)
 }
 
@@ -245,6 +407,74 @@ disable-webserver: false
     fn a_file_without_the_key_is_left_alone() {
         // Rather than inventing a line in a format we do not fully parse.
         assert_eq!(with_port("nothing: here\n", MapKind::BlueMap, 8100), None);
+    }
+
+    #[tokio::test]
+    async fn the_config_this_app_writes_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut instance = crate::db::models::Instance::fixture();
+        instance.path = dir.path().to_string_lossy().to_string();
+
+        assert!(ensure_core_conf(&instance).await.unwrap(), "written once");
+        // A user who turns the download back off keeps that answer.
+        let path = core_config_path(&instance);
+        std::fs::write(&path, "accept-download: false\n").unwrap();
+        assert!(!ensure_core_conf(&instance).await.unwrap(), "not written twice");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "accept-download: false\n"
+        );
+        assert!(download_blocked(&instance).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn allowing_the_download_edits_only_that_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut instance = crate::db::models::Instance::fixture();
+        instance.path = dir.path().to_string_lossy().to_string();
+
+        // BlueMap's own file, as it writes it after a refused first start.
+        let path = core_config_path(&instance);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "## BlueMap core config\ndata: \"bluemap\"\naccept-download: false\nrender-thread-count: 2\n",
+        )
+        .unwrap();
+
+        assert!(accept_download(&instance).await.unwrap());
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains("accept-download: true"));
+        assert!(after.contains("render-thread-count: 2"), "{after}");
+        assert!(after.contains("## BlueMap core config"), "{after}");
+        assert!(!download_blocked(&instance).await.unwrap());
+    }
+
+    #[test]
+    fn the_written_webserver_config_carries_the_chosen_port() {
+        let written = webserver_conf(8104);
+        assert_eq!(parse_port(&written, MapKind::BlueMap), Some(8104));
+        // And the file this app writes can be read back by the same parser it
+        // uses on BlueMap's own, which is the point of writing it at all.
+        assert!(written.contains("enabled: true"));
+    }
+
+    #[test]
+    fn the_written_core_config_accepts_the_download_and_says_why() {
+        assert_eq!(accepts_download(CORE_CONF), Some(true));
+        // The file explains itself where somebody will find it: in the file.
+        assert!(CORE_CONF.contains("Mojang"));
+        assert!(CORE_CONF.contains("Web map"));
+    }
+
+    #[test]
+    fn a_refusal_to_download_is_read_back_as_one() {
+        assert_eq!(accepts_download("accept-download: false\n"), Some(false));
+        assert_eq!(accepts_download("accept-download: true\n"), Some(true));
+        // Commented out is not a setting, and neither is a neighbouring key.
+        assert_eq!(accepts_download("# accept-download: true\n"), None);
+        assert_eq!(accepts_download("accept-downloads: true\n"), None);
+        assert_eq!(accepts_download("data: \"bluemap\"\n"), None);
     }
 
     #[test]

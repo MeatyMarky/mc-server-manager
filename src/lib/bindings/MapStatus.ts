@@ -34,4 +34,9 @@ running: boolean,
  * Another server already using this port, named. Two maps on one port is
  * the second one silently failing to start its web server.
  */
-conflict: string | null, };
+conflict: string | null, 
+/**
+ * True when BlueMap's config says it may not download its resources, which
+ * is the state it stops in with "BlueMap is missing important resources!".
+ */
+downloadBlocked: boolean, };

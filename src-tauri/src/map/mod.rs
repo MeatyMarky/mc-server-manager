@@ -175,6 +175,9 @@ pub struct MapStatus {
     /// Another server already using this port, named. Two maps on one port is
     /// the second one silently failing to start its web server.
     pub conflict: Option<String>,
+    /// True when BlueMap's config says it may not download its resources, which
+    /// is the state it stops in with "BlueMap is missing important resources!".
+    pub download_blocked: bool,
 }
 
 /// Everything the Map tab needs, read fresh from disk.
@@ -194,6 +197,10 @@ pub async fn status(state: &AppState, id: i64) -> AppResult<MapStatus> {
     };
 
     Ok(MapStatus {
+        download_blocked: match kind {
+            Some(MapKind::BlueMap) => config::download_blocked(&row).await?,
+            _ => false,
+        },
         available: kinds_for(row.server_type),
         config_path: kind.map(|kind| config::config_path(&row, kind).to_string_lossy().to_string()),
         // Loopback rather than a name: this is the machine the server runs on,
@@ -325,19 +332,33 @@ where
 
     remember(state, id, kind).await?;
 
-    // The config does not exist until the server has started once, so this is
-    // best effort by design: `status` reads the port from the file each time,
-    // and a first start on the default port is corrected on the next one.
     let port = free_port(state, id, kind).await?;
-    let moved = config::write_port(&row, kind, port).await.unwrap_or(false);
 
-    Ok(match moved {
-        true => format!("{} installed, on port {port}", kind.label()),
-        false => format!(
-            "{} installed. It writes its config on the server's first start.",
-            kind.label()
-        ),
-    })
+    // BlueMap needs its config before its first start, not after it. Two
+    // reasons: `accept-download` defaults to false and BlueMap stops on the
+    // first start without it ("BlueMap is missing important resources!"), and a
+    // port chosen after that start would only take effect on the next one.
+    // BlueMap creates these files only when they are missing, so writing them
+    // first settles both — and neither is ever overwritten.
+    if kind == MapKind::BlueMap {
+        config::ensure_core_conf(&row).await?;
+        config::ensure_webserver_conf(&row, port).await?;
+    } else {
+        // Dynmap has no such gate; its config is written on the first start and
+        // the port is moved from there.
+        let _ = config::write_port(&row, kind, port).await;
+    }
+
+    Ok(format!(
+        "{} installed, on port {port}{}",
+        kind.label(),
+        match kind {
+            MapKind::BlueMap =>
+                ". It downloads a Minecraft client jar from Mojang on the first start, to take \
+                 block textures out of it.",
+            MapKind::Dynmap => ".",
+        }
+    ))
 }
 
 /// Records which map an instance is meant to have.

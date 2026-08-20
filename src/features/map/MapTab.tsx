@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/misc";
 import { copyToClipboard } from "@/lib/clipboard";
 import { openExternal } from "@/lib/external";
 import { ipc } from "@/lib/ipc";
+import { toastError } from "@/lib/toast";
 import type { InstanceView } from "@/lib/types";
 
 /**
@@ -20,6 +21,7 @@ import type { InstanceView } from "@/lib/types";
 export function MapTab({ instance }: { instance: InstanceView }) {
   // Reloading an iframe means changing its key: the page inside is not ours.
   const [reloads, setReloads] = useState(0);
+  const [allowing, setAllowing] = useState(false);
 
   const status = useQuery({
     queryKey: ["map", instance.id, instance.status],
@@ -74,6 +76,38 @@ export function MapTab({ instance }: { instance: InstanceView }) {
           ) : null}
         </div>
       </div>
+
+      {map.downloadBlocked ? (
+        <div className="rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
+          <p className="flex items-start gap-2">
+            <AlertTriangle
+              className="mt-0.5 size-3.5 shrink-0 text-[var(--status-starting)]"
+              aria-hidden
+            />
+            <span>
+              BlueMap will not render until it is allowed to download a Minecraft client jar
+              from Mojang, which is where it gets block textures. Its config currently says no,
+              and the server stops on start with "BlueMap is missing important resources!".
+              Allowing it says you own Minecraft: Java Edition and accept Mojang's EULA.
+            </span>
+          </p>
+          <Button
+            size="sm"
+            className="mt-2"
+            disabled={allowing}
+            onClick={() => {
+              setAllowing(true);
+              ipc
+                .mapAcceptDownload(instance.id)
+                .then(() => status.refetch())
+                .catch((error: unknown) => toastError(error))
+                .finally(() => setAllowing(false));
+            }}
+          >
+            {allowing ? "Saving…" : "Allow the download"}
+          </Button>
+        </div>
+      ) : null}
 
       {map.conflict ? (
         <p className="flex items-start gap-2 rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
