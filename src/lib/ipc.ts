@@ -25,6 +25,10 @@ import type {
   JavaRuntime,
   JavaStatus,
   ScanInfo,
+  MappingResult,
+  PublicAddress,
+  NetworkView,
+  Reachability,
   InstallPlan,
   KeyInfo,
   Category,
@@ -153,6 +157,15 @@ export const ipc = {
 
   javaList: () => invoke<JavaRuntime[]>("java_list"),
   javaScanInfo: () => invoke<ScanInfo>("java_scan_info"),
+
+  networkView: (id: number) => invoke<NetworkView>("network_view", { id }),
+  networkPublicIp: (id: number) => invoke<PublicAddress | null>("network_public_ip", { id }),
+  networkExternalCheck: (id: number, host: string) =>
+    invoke<Reachability>("network_external_check", { id, host }),
+  networkUpnpAvailable: () => invoke<string | null>("network_upnp_available"),
+  networkUpnpMap: (id: number, localIp: string) =>
+    invoke<MappingResult>("network_upnp_map", { id, localIp }),
+  networkUpnpUnmap: (id: number) => invoke<MappingResult>("network_upnp_unmap", { id }),
   javaRescan: () => invoke<JavaRuntime[]>("java_rescan"),
   javaAddManual: (path: string) => invoke<JavaRuntime>("java_add_manual", { path }),
   javaStatus: (id: number) => invoke<JavaStatus>("java_status", { id }),

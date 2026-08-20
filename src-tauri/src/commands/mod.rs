@@ -11,6 +11,7 @@ pub mod players;
 pub mod runtimes;
 pub mod java;
 pub mod mods;
+pub mod net;
 pub mod process;
 pub mod setup;
 pub mod worlds;

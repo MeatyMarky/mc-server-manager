@@ -203,6 +203,42 @@ sorts exits into requested / failed-start / crash from whether `reached_ready` w
 failed starts are recorded as `failed_start` (so they never consume the crash budget), and
 the last console line is repeated with the reason instead of scrolling away.
 
+### Only one copy of the app runs
+A second launch opens the same SQLite file and the same instance folders, and two supervisors
+reconciling the same pids is how rows and consoles get lost. `tauri-plugin-single-instance`
+is registered **first**, before anything touches the database: the second launch hands its
+arguments to the running copy, which unminimizes, shows and focuses its window — in that
+order, because an unshown window cannot take focus — and then exits.
+
+### A version is picked from a table, with dates
+Two hundred versions in a dropdown is a scroll bar and a guess. `VersionEntry` carries
+`release_time` and `kind` from Mojang's manifest, the picker is a table (version, date, type)
+with Releases / Snapshots / Pre-releases checkboxes, and the server type is chosen first
+because Paper's version list is not Mojang's. The manifest calls every non-release a
+`snapshot`, so `mcversion::classify_kind` splits the pre-releases and release candidates out
+by the id's own suffix — they are what people go looking for by name. `old_alpha`/`old_beta`
+are dropped entirely: Mojang published no server jar before 1.2.5.
+
+### Addresses are labelled by block, never by adapter name
+Adapter names are localised, renamed and driver-specific; the address block is the stable
+part. 25.x is Hamachi, 26.x is Radmin, 100.64–100.127 is Tailscale (shared with carrier NAT,
+hence "usually"), the RFC1918 blocks are the LAN. `net::classify` is pure with a fixture per
+range, including the addresses one step outside each one.
+
+### The port check answers two different questions
+From this machine we can only see whether something is listening (`local_port_state`, a
+connect rather than a bind — a bind answers the opposite question). Whether the internet can
+reach it is asked of an outside service, and a failed check reports `reachable: None` with a
+sentence saying it proves nothing. "Closed" when the truth is "the status API was down" sends
+somebody off to rewrite router settings that were fine.
+
+### UPnP is offered, never assumed
+A mapping is a change to somebody's router, so it happens on a click and nowhere else, with
+a 12-hour lease rather than a permanent entry that outlives the app. Every failure path ends
+in the manual steps, which name the actual gateway address rather than saying "log into your
+router". A router whose own external address is private is carrier-grade NAT, and the tab
+says so instead of letting someone re-do their port forwarding all evening.
+
 ### Downloads
 Bytes land in `<file>.part`, resume with a `Range` request when the server allows it, are
 checksum-verified before the rename, and only then take the final name. A half-downloaded
@@ -424,7 +460,9 @@ Do not hand-edit it.
 - Sidebar lists instances with a status dot: stopped / starting / running / stopping /
   crashed / unmanaged / missing.
 - Instance detail has exactly these tabs: Console, Mods, Config, Players, Worlds, Backups,
-  Settings.
+  Networking, Settings. App-wide options live in their own Settings screen (gear in the
+  titlebar), never in an instance's tab — an instance tab is unreachable until an instance
+  exists, which is exactly when the CurseForge key and the Java list are wanted.
 - Everything is keyboard-navigable. The console has an autoscroll toggle, search, and copy.
 - **Scrolling containers are built for a small window.** Every flex column between the
   window and a scroll area carries `min-h-0`, or the child cannot shrink, grows past the
@@ -439,6 +477,9 @@ Do not hand-edit it.
   footer removes exactly that much from the scroll height, and the last line of content ends
   up underneath it with nowhere left to scroll (measured: 8px of "1 file to download · 2.4 MB"
   hidden at 1000x700).
+- **Copying goes through `lib/clipboard.ts`.** `navigator.clipboard` needs a secure context
+  and the webview's custom scheme is not one everywhere, so the plugin does it and a failure
+  is reported rather than swallowed — the same shape as the dead-link bug.
 - **External addresses go through `lib/external.ts`.** One helper, awaited, http and https
   only, and it reports a failure instead of swallowing it — `void openUrl(...)` turned a
   missing opener scope into a dead button everywhere at once. The opener capability needs

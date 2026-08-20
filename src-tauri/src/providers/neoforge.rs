@@ -68,7 +68,7 @@ pub fn versions_from_metadata(xml: &str) -> Vec<VersionEntry> {
         }
     }
     seen.into_iter()
-        .map(|id| VersionEntry { id, stable: true })
+        .map(|id| VersionEntry::new(id, true))
         .collect()
 }
 

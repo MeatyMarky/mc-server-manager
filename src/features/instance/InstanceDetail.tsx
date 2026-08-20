@@ -22,6 +22,7 @@ import type { InstanceView } from "@/lib/types";
 import { ConfigTab } from "@/features/config/ConfigTab";
 import { ConsoleTab } from "@/features/console/ConsoleTab";
 import { ModsTab } from "@/features/mods/ModsTab";
+import { NetworkingTab } from "@/features/network/NetworkingTab";
 import { PlayersTab } from "@/features/players/PlayersTab";
 import { BackupsTab } from "@/features/backups/BackupsTab";
 import { WorldsTab } from "@/features/worlds/WorldsTab";
@@ -37,6 +38,7 @@ const TABS = [
   { value: "players", label: "Players" },
   { value: "worlds", label: "Worlds" },
   { value: "backups", label: "Backups" },
+  { value: "networking", label: "Networking" },
   { value: "settings", label: "Settings" },
 ] as const;
 
@@ -184,6 +186,17 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
             />
           ) : (
             <BackupsTab instance={instance} />
+          )}
+        </TabsContent>
+        <TabsContent value="networking" className="min-h-0">
+          {missing ? (
+            <PlaceholderTab
+              title="Networking"
+              phase={10}
+              description="Locate the instance folder to see how people reach this server."
+            />
+          ) : (
+            <NetworkingTab instance={instance} />
           )}
         </TabsContent>
         <TabsContent value="settings">

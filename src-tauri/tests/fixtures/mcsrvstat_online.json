@@ -1,0 +1,8 @@
+{
+  "online": true,
+  "ip": "81.2.69.142",
+  "port": 25565,
+  "hostname": "example.invalid",
+  "version": "1.21.4",
+  "players": { "online": 0, "max": 20 }
+}

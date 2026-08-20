@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderOpen } from "lucide-react";
+import { AlertTriangle, FolderOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -14,16 +14,21 @@ import {
   Label,
 } from "@/components/ui/dialog";
 import { Input, Select } from "@/components/ui/input";
-import { errorMessage, ipc } from "@/lib/ipc";
 import { JavaPlanNotice } from "@/features/setup/ManagedRuntimes";
+import { useProviderBuilds } from "@/features/setup/queries";
+import { errorMessage, ipc } from "@/lib/ipc";
 import { SERVER_TYPES, SERVER_TYPE_LABEL } from "@/lib/status";
 import type { ServerType } from "@/lib/types";
 import { useAppInfo, useCreateInstance } from "./queries";
+import { VersionTable } from "./VersionTable";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
+
+/** Share of this machine's RAM above which a heap is called out. */
+const RAM_WARNING_SHARE = 0.7;
 
 export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
   const { data: appInfo } = useAppInfo();
@@ -34,11 +39,27 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
   const [path, setPath] = useState("");
   const [serverType, setServerType] = useState<ServerType>("paper");
   const [mcVersion, setMcVersion] = useState("");
+  const [build, setBuild] = useState("");
   const [maxRam, setMaxRam] = useState(4096);
+
+  // Builds depend on both choices, so the dropdown only has something to show
+  // once a version is picked. Vanilla has none at all.
+  const builds = useProviderBuilds(serverType, mcVersion, Boolean(mcVersion));
+  const buildRows = builds.data ?? [];
+  const needsBuild = serverType !== "vanilla";
 
   useEffect(() => {
     if (isOpen && appInfo && !root) setRoot(appInfo.defaultInstanceRoot);
   }, [appInfo, isOpen, root]);
+
+  // A version from one server type means nothing to another: Paper's list is
+  // not Mojang's, and a stale selection would install the wrong thing.
+  useEffect(() => {
+    setMcVersion("");
+    setBuild("");
+  }, [serverType]);
+
+  useEffect(() => setBuild(""), [mcVersion]);
 
   // The folder name is derived in Rust, never assembled here.
   useEffect(() => {
@@ -72,6 +93,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
     setName("");
     setPath("");
     setMcVersion("");
+    setBuild("");
     setServerType("paper");
     setMaxRam(4096);
   }
@@ -82,13 +104,17 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
       toast.error("Pick a parent folder and a name first");
       return;
     }
+    if (!mcVersion) {
+      toast.error("Choose a Minecraft version");
+      return;
+    }
     try {
       await create.mutateAsync({
         name: name.trim(),
         path,
         serverType,
-        mcVersion: mcVersion.trim(),
-        loaderVersion: null,
+        mcVersion,
+        loaderVersion: build || null,
         minRamMb: Math.min(1024, maxRam),
         maxRamMb: maxRam,
         notes: null,
@@ -102,14 +128,17 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
     }
   }
 
+  const totalRam = appInfo?.totalRamMb ?? 0;
+  const ramIsGreedy = totalRam > 0 && maxRam > totalRam * RAM_WARNING_SHARE;
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>New instance</DialogTitle>
+          <DialogTitle>New server</DialogTitle>
           <DialogDescription>
-            Creates the folder and records the instance. The server jar is downloaded in a
-            later step, and the EULA is never accepted for you.
+            Creates the folder and records the server. The files are downloaded in a later step,
+            and the EULA is never accepted for you.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,32 +175,56 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {/* Server type first: it decides which versions exist. */}
+          <div className="grid gap-2">
+            <Label htmlFor="instance-type">Server type</Label>
+            <Select
+              id="instance-type"
+              value={serverType}
+              onChange={(event) => setServerType(event.target.value as ServerType)}
+            >
+              {SERVER_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {SERVER_TYPE_LABEL[type]}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Minecraft version</Label>
+            <VersionTable serverType={serverType} value={mcVersion} onChange={setMcVersion} />
+          </div>
+
+          {needsBuild ? (
             <div className="grid gap-2">
-              <Label htmlFor="instance-type">Server type</Label>
+              <Label htmlFor="instance-build">
+                {serverType === "fabric" ? "Loader version" : "Build"}
+              </Label>
               <Select
-                id="instance-type"
-                value={serverType}
-                onChange={(event) => setServerType(event.target.value as ServerType)}
+                id="instance-build"
+                value={build}
+                disabled={!mcVersion || builds.isLoading || buildRows.length === 0}
+                onChange={(event) => setBuild(event.target.value)}
               >
-                {SERVER_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {SERVER_TYPE_LABEL[type]}
+                <option value="">
+                  {!mcVersion
+                    ? "Choose a version first"
+                    : builds.isLoading
+                      ? "Loading…"
+                      : buildRows.length === 0
+                        ? "None published for this version"
+                        : "Newest (recommended)"}
+                </option>
+                {buildRows.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.id}
+                    {entry.label ? ` · ${entry.label}` : ""}
                   </option>
                 ))}
               </Select>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="instance-version">Minecraft version</Label>
-              <Input
-                id="instance-version"
-                required
-                value={mcVersion}
-                placeholder="1.21.4"
-                onChange={(event) => setMcVersion(event.target.value)}
-              />
-            </div>
-          </div>
+          ) : null}
 
           {/* Which Java this version needs, and the download that provides it —
               asked here rather than at the first failed start. */}
@@ -187,14 +240,32 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
               value={maxRam}
               onChange={(event) => setMaxRam(Number(event.target.value))}
             />
+            {ramIsGreedy ? (
+              // Not a refusal: somebody with 16 GB and nothing else running may
+              // well mean it. It is a warning because the failure it prevents -
+              // the machine swapping until it stops responding - looks like the
+              // server hanging rather than like a setting.
+              <p className="flex items-start gap-2 text-xs text-[var(--status-starting)]">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                <span>
+                  That is more than {Math.round(RAM_WARNING_SHARE * 100)}% of this computer's{" "}
+                  {Math.round(totalRam / 1024)} GB. Leave room for Windows, the launcher and
+                  anything else running, or the machine will swap and the server will stutter.
+                </span>
+              </p>
+            ) : totalRam > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                This computer has {Math.round(totalRam / 1024)} GB.
+              </p>
+            ) : null}
           </div>
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? "Creating…" : "Create instance"}
+            <Button type="submit" disabled={create.isPending || !mcVersion}>
+              {create.isPending ? "Creating…" : "Create server"}
             </Button>
           </DialogFooter>
         </form>

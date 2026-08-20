@@ -20,7 +20,9 @@ dunce = "1.0.5"
 flate2 = "1.1.9"
 futures-util = "0.3.34"
 hex = "0.4.3"
+igd-next = { version = "0.17.1", features = ["aio_tokio"] }
 md-5 = "0.10.6"
+netdev = "0.46.1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2", "charset"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -32,8 +34,10 @@ tar = "0.4.46"
 # `protocol-asset` lets the page read cached mod icons from disk; the scope in
 # tauri.conf.json limits that to the icon cache folder and nothing else.
 tauri = { version = "2.11.5", features = ["tray-icon", "protocol-asset"] }
+tauri-plugin-clipboard-manager = "2.3.2"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-opener = "2.5.4"
+tauri-plugin-single-instance = "2.4.3"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-util = "0.7.19"

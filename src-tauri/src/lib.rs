@@ -11,6 +11,7 @@ pub mod instance;
 pub mod java;
 pub mod logparse;
 pub mod mcversion;
+pub mod net;
 pub mod providers;
 pub mod metrics;
 pub mod mods;
@@ -35,6 +36,22 @@ const MAIN_WINDOW: &str = "main";
 
 pub fn run() {
     tauri::Builder::default()
+        // First, before anything touches the database. A second copy of this
+        // app would open the same SQLite file and the same instance folders,
+        // and two supervisors reconciling the same pids is a way to lose a
+        // server's console or its rows. The second launch hands its arguments
+        // to the copy already running and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tracing::info!("a second launch was folded into the running app");
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                // The running copy may be minimised to the tray, so showing
+                // comes before focusing - an unshown window cannot take focus.
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -179,6 +196,12 @@ pub fn run() {
             commands::setup::eula_get,
             commands::setup::eula_set,
             commands::setup::read_installer_log,
+            commands::net::network_view,
+            commands::net::network_public_ip,
+            commands::net::network_external_check,
+            commands::net::network_upnp_available,
+            commands::net::network_upnp_map,
+            commands::net::network_upnp_unmap,
             commands::java::java_list,
             commands::java::java_scan_info,
             commands::java::java_rescan,

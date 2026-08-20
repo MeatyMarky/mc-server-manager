@@ -46,25 +46,40 @@ what signing would involve.
 
 1. Open the app. It looks for Java in the background and tells you what it found.
 2. Click **Create a server**.
-3. Choose a name, a folder, a Minecraft version, and a type:
+3. Choose a name, a folder, and a type:
    - **Vanilla** — exactly what Mojang ships.
    - **Paper** / **Purpur** — much faster, and they take **plugins**.
    - **Fabric** / **Forge** / **NeoForge** — they take **mods**.
    If you are unsure, pick Paper.
-4. Wait for the download to finish.
-5. Open the **Settings** tab and **accept the Minecraft EULA**. The app never accepts it
+4. Pick a Minecraft version from the table. It lists every version that type offers with
+   the date it came out, newest first — tick **Snapshots** or **Pre-releases** if you want
+   those too. The **Build** dropdown underneath is filled in once you have chosen; leave it
+   on "Newest" unless you need a particular one.
+5. Wait for the download to finish.
+6. Open the **Settings** tab and **accept the Minecraft EULA**. The app never accepts it
    for you — a server refuses to start until you do.
-6. Press **Start**.
+7. Press **Start**.
 
 The **Console** tab shows the server's output live. Type commands into the box at the
 bottom, exactly as you would in a terminal.
 
 ### 4. Let people in
 
-- Others on your home network connect to your computer's local IP, port `25565`.
-- Over the internet, you have to forward port `25565` on your router to this computer.
-  That is a router setting, not an app setting.
-- **Players**, **Worlds**, **Config** and **Backups** each have their own tab.
+The **Networking** tab answers this for your machine specifically:
+
+- Every address this computer has, with a **Copy** button and a line saying who each one
+  works for — the people in your house, whoever is on the same Radmin/Hamachi/Tailscale
+  network, or the internet.
+- Your **public address**, hidden until you press Show, and a **check from outside** that
+  says whether the port is really open. If that check cannot be completed it says so,
+  rather than claiming the port is shut.
+- A button that asks the router to forward the port over **UPnP**, and — for the many
+  routers that will not — the manual steps, written out with your own router's address.
+- Whether the **whitelist** is on, and a button to turn it on while the server is stopped.
+
+**Players**, **Worlds**, **Config** and **Backups** each have their own tab. App-wide
+options — theme, the folder new servers go in, downloaded Java, the CurseForge key — are
+behind the **gear** in the top right.
 
 ### Where your files live
 

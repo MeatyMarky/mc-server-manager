@@ -45,10 +45,7 @@ pub fn parse_game_versions(body: &str) -> AppResult<Vec<VersionEntry>> {
     Ok(versions
         .into_iter()
         .filter(|v| v.stable)
-        .map(|v| VersionEntry {
-            id: v.version,
-            stable: true,
-        })
+        .map(|v| VersionEntry::new(v.version, true))
         .collect())
 }
 

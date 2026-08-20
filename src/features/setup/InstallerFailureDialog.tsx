@@ -1,6 +1,5 @@
 import { Copy, FileText } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { copyToClipboard } from "@/lib/clipboard";
 import { ipc } from "@/lib/ipc";
 import { toastError } from "@/lib/toast";
 import type { TaskDoneEvent } from "@/lib/types";
@@ -72,10 +72,7 @@ export function InstallerFailureDialog({
         <DialogFooter>
           <Button
             variant="ghost"
-            onClick={() => {
-              void navigator.clipboard.writeText(shown);
-              toast.success("Log copied");
-            }}
+            onClick={() => void copyToClipboard(shown, "Installer log")}
           >
             <Copy /> Copy
           </Button>

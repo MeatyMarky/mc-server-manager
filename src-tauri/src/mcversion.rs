@@ -8,6 +8,41 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+/// What kind of release a version is, as the picker's filters see it.
+///
+/// Mojang's manifest has one `type` field, and it calls everything that is not
+/// a release a `snapshot` - including the pre-releases and release candidates
+/// that lead up to one. Those are the versions people deliberately go looking
+/// for ("the 1.21.4 pre-release we were testing on"), so they are separated
+/// out here by the only marker that exists: the id's own suffix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum VersionKind {
+    Release,
+    Snapshot,
+    /// `1.21.4-pre1` and `1.21-rc1` alike: the run-up to a release.
+    PreRelease,
+    /// The 2009-2011 alpha and beta builds, most of which have no server jar.
+    Ancient,
+}
+
+/// The kind of a version, from the manifest's own `type` plus the id's suffix.
+pub fn classify_kind(id: &str, manifest_type: &str) -> VersionKind {
+    match manifest_type {
+        "release" => VersionKind::Release,
+        "old_alpha" | "old_beta" => VersionKind::Ancient,
+        _ => {
+            let lower = id.to_ascii_lowercase();
+            if lower.contains("-pre") || lower.contains("-rc") || lower.contains("_pre") {
+                VersionKind::PreRelease
+            } else {
+                VersionKind::Snapshot
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Era {
     /// `1.x` releases, up to and including the 1.21 line.

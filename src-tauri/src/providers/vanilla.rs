@@ -72,17 +72,26 @@ pub fn parse_manifest_entries(body: &str) -> AppResult<Vec<IndexedVersion>> {
         .collect())
 }
 
-/// Releases only — snapshots are excluded from the picker, but a snapshot id
-/// typed by hand still resolves.
+/// Every version with a server to run, newest first.
+///
+/// Snapshots and pre-releases are kept - the picker filters them, and someone
+/// testing a mod against next week's snapshot needs to be able to choose one.
+/// The alpha and beta builds are dropped: Mojang published no server jar before
+/// 1.2.5, so offering them is offering a failure.
 pub fn parse_manifest(body: &str) -> AppResult<Vec<VersionEntry>> {
     let manifest: Manifest = serde_json::from_str(body)?;
     Ok(manifest
         .versions
         .into_iter()
-        .filter(|v| v.kind == "release")
-        .map(|v| VersionEntry {
-            id: v.id,
-            stable: true,
+        .filter(|v| v.kind != "old_alpha" && v.kind != "old_beta")
+        .map(|v| {
+            let kind = crate::mcversion::classify_kind(&v.id, &v.kind);
+            VersionEntry {
+                stable: kind == crate::mcversion::VersionKind::Release,
+                release_time: Some(v.release_time),
+                kind,
+                id: v.id,
+            }
         })
         .collect())
 }
@@ -161,8 +170,10 @@ mod tests {
             )
     }
 
+    /// The picker filters by kind, so the list has to carry every kind that
+    /// has a server jar - and mark which is which.
     #[test]
-    fn manifest_lists_releases_only() {
+    fn manifest_keeps_snapshots_and_labels_every_kind() {
         let body = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/vanilla_version_manifest_v2.json"),
@@ -172,7 +183,28 @@ mod tests {
         let ids: Vec<&str> = versions.iter().map(|v| v.id.as_str()).collect();
         assert!(ids.contains(&"26.2"));
         assert!(ids.contains(&"1.21.4"));
-        assert!(!ids.iter().any(|id| id.contains("snapshot")));
+        assert!(ids.iter().any(|id| id.contains("snapshot")));
+
+        let release = versions.iter().find(|v| v.id == "26.2").unwrap();
+        assert_eq!(release.kind, crate::mcversion::VersionKind::Release);
+        assert!(release.stable);
+        // A date on every row: the table's whole reason for existing.
+        assert!(release.release_time.as_deref().unwrap().contains('T'));
+
+        let snapshot = versions.iter().find(|v| v.id.contains("snapshot")).unwrap();
+        assert_eq!(snapshot.kind, crate::mcversion::VersionKind::Snapshot);
+        assert!(!snapshot.stable);
+    }
+
+    /// Alpha and beta predate the server jar entirely, so offering them would
+    /// only ever produce a failed install.
+    #[test]
+    fn the_pre_server_era_is_left_out() {
+        let body = manifest_body();
+        let versions = parse_manifest(&body).unwrap();
+        assert!(!versions
+            .iter()
+            .any(|v| v.kind == crate::mcversion::VersionKind::Ancient));
     }
 
     #[test]
@@ -226,7 +258,20 @@ mod tests {
     async fn versions_come_back_in_release_order() {
         let index = index_from_fixture();
         let versions = list_versions(&fixtures(), &index).await.unwrap();
-        assert_eq!(versions.first().map(|v| v.id.as_str()), Some("26.2"));
+
+        // Newest first, across both numbering eras and both kinds.
+        let dates: Vec<&str> = versions
+            .iter()
+            .filter_map(|v| v.release_time.as_deref())
+            .collect();
+        assert!(dates.windows(2).all(|pair| pair[0] >= pair[1]), "{dates:?}");
+
+        // The newest *release* is still the one a picker defaults to.
+        let newest_release = versions
+            .iter()
+            .find(|v| v.kind == crate::mcversion::VersionKind::Release)
+            .map(|v| v.id.as_str());
+        assert_eq!(newest_release, Some("26.2"));
         assert_eq!(versions.last().map(|v| v.id.as_str()), Some("1.12.2"));
     }
 

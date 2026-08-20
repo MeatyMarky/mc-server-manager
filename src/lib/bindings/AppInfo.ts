@@ -5,4 +5,9 @@ export type AppInfo = { version: string, dataDir: string, platform: string,
  * Suggested parent folder for new instances. Instances may live anywhere;
  * this only pre-fills the create dialog.
  */
-defaultInstanceRoot: string, };
+defaultInstanceRoot: string, 
+/**
+ * Physical RAM in megabytes, for the "you are giving the server more than
+ * this machine can spare" warning.
+ */
+totalRamMb: number, };

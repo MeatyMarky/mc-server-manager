@@ -19,6 +19,10 @@ pub struct AppInfo {
     /// Suggested parent folder for new instances. Instances may live anywhere;
     /// this only pre-fills the create dialog.
     pub default_instance_root: String,
+    /// Physical RAM in megabytes, for the "you are giving the server more than
+    /// this machine can spare" warning.
+    #[ts(type = "number")]
+    pub total_ram_mb: i64,
 }
 
 #[tauri::command]
@@ -41,7 +45,18 @@ pub async fn app_info(state: State<'_, AppState>) -> AppResult<AppInfo> {
         data_dir: state.data_dir.to_string_lossy().to_string(),
         platform: std::env::consts::OS.to_string(),
         default_instance_root: default_root,
+        total_ram_mb: total_ram_mb(),
     })
+}
+
+/// Physical RAM, in megabytes.
+///
+/// Only the total: what is free right now says nothing useful about what a
+/// server can be given, because the OS hands back cache on demand.
+fn total_ram_mb() -> i64 {
+    let mut system = sysinfo::System::new();
+    system.refresh_memory();
+    (system.total_memory() / 1024 / 1024) as i64
 }
 
 #[tauri::command]

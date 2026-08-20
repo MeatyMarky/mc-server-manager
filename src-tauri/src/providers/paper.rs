@@ -48,7 +48,7 @@ pub fn parse_versions(body: &str) -> AppResult<Vec<VersionEntry>> {
     ids.retain(|id| mcversion::parse(id).is_some_and(|v| v.is_release()));
     Ok(ids
         .into_iter()
-        .map(|id| VersionEntry { id, stable: true })
+        .map(|id| VersionEntry::new(id, true))
         .collect())
 }
 

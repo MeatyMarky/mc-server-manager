@@ -73,7 +73,7 @@ pub fn versions_from_promotions(body: &str) -> AppResult<Vec<VersionEntry>> {
     }
     Ok(ids
         .into_iter()
-        .map(|id| VersionEntry { id, stable: true })
+        .map(|id| VersionEntry::new(id, true))
         .collect())
 }
 

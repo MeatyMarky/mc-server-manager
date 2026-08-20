@@ -18,7 +18,7 @@ use ts_rs::TS;
 use crate::db::models::ServerType;
 use crate::error::AppResult;
 use crate::http::Fetch;
-use crate::mcversion::VersionIndex;
+use crate::mcversion::{VersionIndex, VersionKind};
 
 /// What gets downloaded: either the server jar itself, or an installer that has
 /// to be run to produce a server.
@@ -53,12 +53,33 @@ pub struct Artifact {
 }
 
 /// One selectable Minecraft version.
+///
+/// The date and the kind come from Mojang's manifest rather than from the id,
+/// and they are what make a list of two hundred versions usable: "the one from
+/// last March" is a question a table with dates can answer, and a dropdown
+/// cannot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct VersionEntry {
     pub id: String,
     pub stable: bool,
+    /// RFC3339, when the manifest lists this version. A build a provider
+    /// invented (a Paper release candidate) has none.
+    pub release_time: Option<String>,
+    pub kind: VersionKind,
+}
+
+impl VersionEntry {
+    /// A bare entry, before the chronology index has been consulted.
+    pub fn new(id: impl Into<String>, stable: bool) -> Self {
+        Self {
+            id: id.into(),
+            stable,
+            release_time: None,
+            kind: VersionKind::Release,
+        }
+    }
 }
 
 /// One selectable build for a given Minecraft version (Paper build, Forge
@@ -72,8 +93,19 @@ pub struct BuildEntry {
     pub label: Option<String>,
 }
 
-/// Sorts version entries by release chronology, newest first.
+/// Sorts version entries by release chronology, newest first, and fills in
+/// each one's release date and kind from the manifest.
+///
+/// The kind is the manifest's, not the provider's: Paper publishes a version
+/// list with no notion of a snapshot, and a snapshot listed there is still a
+/// snapshot.
 pub fn sort_entries(mut entries: Vec<VersionEntry>, index: &VersionIndex) -> Vec<VersionEntry> {
+    for entry in &mut entries {
+        if let Some(indexed) = index.get(&entry.id) {
+            entry.release_time = Some(indexed.release_time.clone());
+            entry.kind = crate::mcversion::classify_kind(&entry.id, &indexed.kind);
+        }
+    }
     entries.sort_by(|a, b| index.compare(&b.id, &a.id));
     entries
 }

@@ -128,6 +128,29 @@ sudo apt install libwebkit2gtk-4.1-0     # Debian, Ubuntu
 sudo dnf install webkit2gtk4.1           # Fedora
 ```
 
+## Nobody can join from the internet
+
+Open the server's **Networking** tab and press **Show** next to the public address, then
+**Check from outside**.
+
+- **"An outside service could not reach this server"** — the port is not forwarded. Try the
+  **Forward port** button; if no router answers, follow the manual steps below it, which
+  name your router's address.
+- **"The outside check could not be completed"** — the check failed, not the port. It says
+  nothing either way. Try again, or ask somebody to connect.
+- **"This address is itself inside your provider's network (CGNAT)"** — port forwarding
+  cannot work at all on this connection, however the router is configured. Use one of the
+  VPN addresses on the same tab, or ask your provider for a public address.
+- Everything above can still be blocked by this computer's firewall. On Windows, allow
+  `java.exe` (the one shown in the console at startup) through Windows Defender Firewall on
+  private *and* public networks.
+
+## Opening the app twice does nothing
+
+That is deliberate. A second copy would open the same database and the same server folders
+as the first, which can lose settings or a running server's console. Launching again brings
+the window you already have back to the front — including when it is hidden in the tray.
+
 ## Closing the window did not quit the app
 
 That is deliberate: the window closes to the tray and your servers keep running. Quit from

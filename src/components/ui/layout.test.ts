@@ -114,6 +114,15 @@ describe("external links", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("copies through the one helper too", () => {
+    // `navigator.clipboard` needs a secure context, which the webview's custom
+    // scheme is not everywhere — the same silent-failure shape as the links.
+    const offenders = files.filter((file) =>
+      /navigator\.clipboard/.test(readFileSync(file, "utf8")),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("never opens a URL by any other route", () => {
     const offenders: string[] = [];
     for (const file of files) {

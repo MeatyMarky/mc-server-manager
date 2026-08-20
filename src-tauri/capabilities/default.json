@@ -15,6 +15,7 @@
     "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-confirm",
+    "clipboard-manager:allow-write-text",
     "opener:default",
     "opener:allow-open-path",
     "opener:allow-open-url",

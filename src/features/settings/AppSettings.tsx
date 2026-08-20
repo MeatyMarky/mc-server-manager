@@ -19,6 +19,7 @@ import { CurseForgeKey } from "@/features/setup/CurseForgeKey";
 import { ManagedRuntimes } from "@/features/setup/ManagedRuntimes";
 import { ipc } from "@/lib/ipc";
 import { applyTheme, useUiStore, type Theme } from "@/stores/ui";
+import { useAppInfo } from "@/features/instances/queries";
 import { DetectedJava } from "./DetectedJava";
 import { useSetSetting, useSettings } from "./queries";
 
@@ -38,7 +39,7 @@ export function AppSettings({
   onReportProblem: () => void;
 }) {
   const settings = useSettings();
-  const info = useQuery({ queryKey: ["app-info"], queryFn: () => ipc.appInfo() });
+  const info = useAppInfo();
   const scan = useQuery({ queryKey: ["java-scan-info"], queryFn: () => ipc.javaScanInfo() });
 
   return (

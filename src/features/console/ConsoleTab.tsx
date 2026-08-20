@@ -1,6 +1,5 @@
 import { ArrowDownToLine, Copy, Search, Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { ErrorNotice } from "@/components/ui/ErrorNotice";
@@ -8,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge, Switch } from "@/components/ui/misc";
 import { Label } from "@/components/ui/dialog";
 import { InstallPanel } from "@/features/setup/InstallPanel";
+import { copyToClipboard } from "@/lib/clipboard";
 import { toastError } from "@/lib/toast";
 import type { InstanceView, LogLevel } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -130,10 +130,12 @@ export function ConsoleTab({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => {
-            void navigator.clipboard.writeText(visible.map((line) => line.raw).join("\n"));
-            toast.success(search ? "Copied the filtered lines" : "Copied the console");
-          }}
+          onClick={() =>
+            void copyToClipboard(
+              visible.map((line) => line.raw).join("\n"),
+              search ? `${visible.length} matching lines` : `${visible.length} console lines`,
+            )
+          }
         >
           <Copy /> Copy
         </Button>
