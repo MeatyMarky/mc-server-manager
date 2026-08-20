@@ -26,6 +26,11 @@ pub struct ConsoleBuffer {
     lines: VecDeque<ParsedLine>,
     next_seq: u64,
     capacity: usize,
+    /// Armed for a first boot with no `server.properties` on disk yet, and
+    /// spent on the first complaint about it.
+    expect_missing_properties: bool,
+    /// Set while the stack trace under that complaint is still arriving.
+    in_missing_properties_trace: bool,
 }
 
 impl ConsoleBuffer {
@@ -38,12 +43,27 @@ impl ConsoleBuffer {
             lines: VecDeque::with_capacity(capacity.min(1024)),
             next_seq: 0,
             capacity,
+            expect_missing_properties: false,
+            in_missing_properties_trace: false,
         }
+    }
+
+    /// Says whether this launch is the one that will create `server.properties`.
+    ///
+    /// A server with no properties file logs a `NoSuchFileException` at ERROR,
+    /// with a full trace, and then starts normally — it writes the file itself.
+    /// On a first boot that is the expected sequence and reads as a serious
+    /// failure; on a later boot the file has gone missing, and the error is the
+    /// whole point. Set per launch, so the state never outlives the run.
+    pub fn expect_missing_properties(&mut self, expected: bool) {
+        self.expect_missing_properties = expected;
+        self.in_missing_properties_trace = false;
     }
 
     /// Parses and stores one line, returning the structured form to be emitted.
     pub fn push(&mut self, raw: &str, stderr: bool) -> ParsedLine {
         let (timestamp, level, thread, message) = logparse::parse_line(raw, stderr);
+        let (level, message) = self.soften_first_boot(raw, level, message);
         let line = ParsedLine {
             seq: self.next_seq,
             captured_at: crate::db::now_rfc3339(),
@@ -61,6 +81,38 @@ impl ConsoleBuffer {
         }
         self.lines.push_back(line.clone());
         line
+    }
+
+    /// Turns the expected first-boot properties error into a note.
+    ///
+    /// The header becomes one info-level sentence and the frames under it drop
+    /// to debug — nothing is dropped, because the raw text of every line is
+    /// still stored, searchable and copyable. Only the colour and the wording
+    /// change, and only for the one launch that was told to expect it.
+    fn soften_first_boot(
+        &mut self,
+        raw: &str,
+        level: LogLevel,
+        message: String,
+    ) -> (LogLevel, String) {
+        if self.expect_missing_properties && logparse::is_missing_properties_header(&message) {
+            // Spent: a second complaint in the same run is not the expected one.
+            self.expect_missing_properties = false;
+            self.in_missing_properties_trace = true;
+            return (
+                LogLevel::Info,
+                logparse::MISSING_PROPERTIES_NOTE.to_string(),
+            );
+        }
+
+        if self.in_missing_properties_trace {
+            if logparse::is_exception_continuation(raw) {
+                return (LogLevel::Debug, message);
+            }
+            self.in_missing_properties_trace = false;
+        }
+
+        (level, message)
     }
 
     /// A line the app itself wrote (start banner, stop notice), so the console
@@ -225,6 +277,122 @@ mod tests {
         assert_eq!(tail.len(), 5);
         assert_eq!(tail.last().unwrap().message, "line 999");
         assert_eq!(tail.first().unwrap().message, "line 995");
+    }
+
+    /// The block a fresh server prints on its way to writing the file.
+    fn first_boot_block() -> Vec<&'static str> {
+        include_str!("../../tests/fixtures/log_first_boot_properties.txt")
+            .lines()
+            .collect()
+    }
+
+    #[test]
+    fn a_first_boot_turns_the_properties_error_into_a_note() {
+        let mut buffer = ConsoleBuffer::new();
+        buffer.expect_missing_properties(true);
+        for line in first_boot_block() {
+            buffer.push(line, false);
+        }
+        let lines = buffer.tail(100);
+
+        let note = lines
+            .iter()
+            .find(|line| line.raw.contains("Failed to load properties"))
+            .expect("the line is still in the console");
+        assert_eq!(note.level, LogLevel::Info);
+        assert_eq!(note.message, logparse::MISSING_PROPERTIES_NOTE);
+        // Nothing is lost: search and copy still see what the server printed.
+        assert!(note.raw.contains("Failed to load properties from file"));
+
+        // The frames under it are demoted, not deleted.
+        let frames: Vec<_> = lines
+            .iter()
+            .filter(|line| {
+                line.raw.contains("NoSuchFileException") || line.raw.trim_start().starts_with("at ")
+            })
+            .collect();
+        assert_eq!(frames.len(), 6, "the exception plus its five frames");
+        assert!(
+            frames.iter().all(|line| line.level == LogLevel::Debug),
+            "{:?}",
+            frames.iter().map(|line| line.level).collect::<Vec<_>>()
+        );
+
+        // The block ends where the server's next real line starts.
+        let after = lines
+            .iter()
+            .find(|line| line.raw.contains("Loaded 1 recipes"))
+            .unwrap();
+        assert_eq!(after.level, LogLevel::Info);
+        let eula = lines
+            .iter()
+            .find(|line| line.raw.contains("Failed to load eula.txt"))
+            .unwrap();
+        assert_eq!(
+            eula.level,
+            LogLevel::Warn,
+            "a different complaint is untouched"
+        );
+    }
+
+    #[test]
+    fn a_later_boot_shows_the_error_in_full() {
+        // The file existed once and does not now. That is a real problem, and
+        // the trace is the useful part of it.
+        let mut buffer = ConsoleBuffer::new();
+        buffer.expect_missing_properties(false);
+        for line in first_boot_block() {
+            buffer.push(line, false);
+        }
+        let lines = buffer.tail(100);
+
+        let header = lines
+            .iter()
+            .find(|line| line.raw.contains("Failed to load properties"))
+            .unwrap();
+        assert_eq!(header.level, LogLevel::Error);
+        assert!(header.message.contains("server.properties"));
+
+        let exception = lines
+            .iter()
+            .find(|line| line.raw.contains("NoSuchFileException"))
+            .unwrap();
+        assert_ne!(exception.level, LogLevel::Debug);
+    }
+
+    #[test]
+    fn the_grace_is_spent_on_one_complaint() {
+        // A run that complains twice gets the softening once; the second time
+        // something else is going on.
+        let mut buffer = ConsoleBuffer::new();
+        buffer.expect_missing_properties(true);
+        let header =
+            "[12:04:12] [ServerMain/ERROR]: Failed to load properties from file: server.properties";
+        buffer.push(header, false);
+        buffer.push("[12:04:13] [ServerMain/INFO]: Preparing level", false);
+        buffer.push(header, false);
+
+        let levels: Vec<LogLevel> = buffer
+            .tail(10)
+            .iter()
+            .filter(|line| line.raw.contains("Failed to load properties"))
+            .map(|line| line.level)
+            .collect();
+        assert_eq!(levels, vec![LogLevel::Info, LogLevel::Error]);
+    }
+
+    #[test]
+    fn arming_a_launch_clears_a_half_finished_block() {
+        let mut buffer = ConsoleBuffer::new();
+        buffer.expect_missing_properties(true);
+        buffer.push(
+            "[12:04:12] [ServerMain/ERROR]: Failed to load properties from file: server.properties",
+            false,
+        );
+        // The process dies mid-trace, and the next launch is an ordinary one.
+        buffer.expect_missing_properties(false);
+        let line = buffer.push("\tat net.minecraft.server.Main.main(Main.java:113)", true);
+        assert_eq!(line.level, LogLevel::Error, "stderr, and no block is open");
     }
 
     #[test]

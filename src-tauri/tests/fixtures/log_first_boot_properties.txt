@@ -1,0 +1,11 @@
+[12:04:11] [ServerMain/INFO]: Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
+[12:04:12] [ServerMain/ERROR]: Failed to load properties from file: server.properties
+java.nio.file.NoSuchFileException: server.properties
+	at sun.nio.fs.WindowsException.translateToIOException(WindowsException.java:85) ~[?:?]
+	at sun.nio.fs.WindowsException.rethrowAsIOException(WindowsException.java:103) ~[?:?]
+	at java.nio.file.Files.newByteChannel(Files.java:380) ~[?:?]
+	at net.minecraft.server.dedicated.DedicatedServerProperties.fromFile(DedicatedServerProperties.java:135) ~[server.jar:?]
+	at net.minecraft.server.Main.main(Main.java:113) ~[server.jar:?]
+[12:04:12] [ServerMain/INFO]: Loaded 1 recipes
+[12:04:13] [ServerMain/WARN]: Failed to load eula.txt
+[12:04:19] [Server thread/INFO]: Done (7.214s)! For help, type "help"

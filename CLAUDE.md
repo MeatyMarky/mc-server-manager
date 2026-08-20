@@ -267,6 +267,18 @@ Auto-restart uses exponential backoff (5 s, 10 s, 20 s… capped at 5 min) and s
 after `restart_max` crashes inside `restart_window_s`, so a server that dies on boot cannot
 spin. Every attempt and every give-up is written to `instance_events`.
 
+### A first boot has one expected error
+A server with no `server.properties` logs `Failed to load properties from file` at ERROR
+with a full `java.nio.file.NoSuchFileException` trace, then starts normally and writes the
+file itself. That block is the expected sequence on a first boot and reads as a serious
+failure, so `ConsoleBuffer::expect_missing_properties` is armed for exactly that launch —
+`last_started_at` is null **and** no properties file is on disk, both read before the row
+is updated — and it turns the header into one info-level sentence with the frames under it
+at debug. Nothing is dropped: `raw` still holds what the server printed, so search, copy
+and the rotated files are unchanged. The grace is spent on the first complaint and cleared
+when the next launch arms the buffer, because on any later boot a missing properties file
+is a real problem and the trace is the useful part of it.
+
 ### Log formats differ per family
 Vanilla, Paper, Forge (log4j plus a logger bracket) and Fabric (a parenthesised logger) all
 print differently, and `logparse` handles each; unparsable lines are still shown verbatim.

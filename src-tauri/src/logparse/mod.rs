@@ -319,6 +319,50 @@ fn parse_log4j(line: &str) -> Option<(Option<String>, LogLevel, Option<String>, 
     ))
 }
 
+/// What the console shows instead of the first boot's missing-properties error.
+pub const MISSING_PROPERTIES_NOTE: &str =
+    "No server.properties yet — the server is about to write one.";
+
+/// The header of the "there is no properties file" complaint.
+///
+/// A server with no `server.properties` logs this at ERROR with a full
+/// `NoSuchFileException` trace and then starts perfectly normally, because the
+/// file does not exist until it writes one. On a first boot that is the
+/// expected sequence of events; on any later boot the file has gone missing,
+/// which is worth every bit of the noise.
+pub fn is_missing_properties_header(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("failed to load properties from file") && lower.contains("server.properties")
+}
+
+/// Whether a line is the continuation of the exception above it.
+///
+/// Java prints the exception class first, then frames indented with a tab or
+/// spaces, then optional `Caused by:` and `... 12 more` lines. None of them
+/// carry a log prefix, which is what separates them from the next real line.
+pub fn is_exception_continuation(line: &str) -> bool {
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    let body = trimmed.trim_start();
+
+    if body.is_empty() {
+        return false;
+    }
+    // A new log line starts with its own bracketed stamp or a log4j date.
+    if trimmed.starts_with('[') || parse_log4j(trimmed).is_some() {
+        return false;
+    }
+    // Indented frames: "\tat java.base/…" or "    at java.base/…".
+    if trimmed.starts_with('\t') || trimmed.starts_with("  ") {
+        return true;
+    }
+    body.starts_with("at ")
+        || body.starts_with("Caused by:")
+        || body.starts_with("Suppressed:")
+        || body.starts_with("...")
+        // The exception line itself: "java.nio.file.NoSuchFileException: …".
+        || (body.starts_with("java.") && body.contains("Exception"))
+}
+
 /// Recognizes the events the supervisor and the players view care about.
 ///
 /// Matching is done on the *message* (prefixes already stripped) so the same
@@ -772,6 +816,77 @@ versions up to 61.0";
 
         let trace = "com.sun.jna.platform.win32.Win32Exception: The parameter is incorrect.";
         assert_eq!(parse_line(trace, true).1, LogLevel::Error);
+    }
+
+    #[test]
+    fn the_first_boot_properties_complaint_is_recognised() {
+        let fixture = include_str!("../../tests/fixtures/log_first_boot_properties.txt");
+        let header = fixture
+            .lines()
+            .find(|line| line.contains("Failed to load properties"))
+            .expect("the fixture has the complaint");
+
+        // It really is an ERROR line as the server prints it.
+        let (_, level, _, message) = parse_line(header, false);
+        assert_eq!(level, LogLevel::Error);
+        assert!(is_missing_properties_header(&message), "{message}");
+
+        // Nothing else in the fixture is.
+        for line in fixture
+            .lines()
+            .filter(|line| !line.contains("Failed to load properties"))
+        {
+            let (_, _, _, message) = parse_line(line, false);
+            assert!(!is_missing_properties_header(&message), "{line}");
+        }
+    }
+
+    #[test]
+    fn every_frame_under_the_exception_is_a_continuation() {
+        let fixture = include_str!("../../tests/fixtures/log_first_boot_properties.txt");
+        let mut lines = fixture
+            .lines()
+            .skip_while(|line| !line.contains("NoSuchFileException"));
+
+        // The exception class, then its five frames.
+        assert!(is_exception_continuation(lines.next().unwrap()));
+        for line in lines.by_ref().take(5) {
+            assert!(is_exception_continuation(line), "{line}");
+        }
+
+        // The server's next real line ends the block.
+        let next = lines.next().unwrap();
+        assert!(next.contains("Loaded 1 recipes"));
+        assert!(!is_exception_continuation(next), "{next}");
+    }
+
+    #[test]
+    fn a_log4j_line_is_never_taken_for_a_stack_frame() {
+        // Paper prints its early lines in the log4j layout, with no bracket to
+        // give the shape away.
+        assert!(!is_exception_continuation(
+            "2026-08-18 12:04:12,123 main INFO  Loading libraries"
+        ));
+        assert!(!is_exception_continuation(
+            "Starting minecraft server version 1.21.4"
+        ));
+        assert!(!is_exception_continuation(""));
+    }
+
+    #[test]
+    fn only_the_properties_complaint_is_matched() {
+        assert!(is_missing_properties_header(
+            "Failed to load properties from file: server.properties"
+        ));
+        // Some builds print a path rather than a bare name.
+        assert!(is_missing_properties_header(
+            "Failed to load properties from file: ./server.properties"
+        ));
+        // A different file going missing is a different problem.
+        assert!(!is_missing_properties_header(
+            "Failed to load properties from file: bukkit.yml"
+        ));
+        assert!(!is_missing_properties_header("Failed to load eula.txt"));
     }
 
     #[test]
