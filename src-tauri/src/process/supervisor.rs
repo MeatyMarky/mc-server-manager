@@ -47,6 +47,9 @@ struct Running {
     /// Set when the server printed its "Done" line. An exit before this is a
     /// start that failed, not a crash, and must not be retried.
     reached_ready: Arc<AtomicBool>,
+    /// The Java this run was launched on, as the binary answered. Recorded with
+    /// the readiness event, so a later rule change can see what already worked.
+    java_major: Option<i64>,
 }
 
 /// Live process registry plus the console history, which outlives the process
@@ -129,6 +132,11 @@ impl Supervisor {
     /// nobody either. Both cases replace the set rather than leaving the last
     /// session's names to be counted again.
     /// Records that this server finished starting.
+    /// The Java version the current run was launched on.
+    pub(crate) fn java_of(&self, uuid: &str) -> Option<i64> {
+        self.running.lock().ok()?.get(uuid)?.java_major
+    }
+
     pub(crate) fn mark_ready(&self, uuid: &str) {
         if let Ok(map) = self.running.lock() {
             if let Some(running) = map.get(uuid) {
@@ -255,6 +263,58 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
             .await?;
         check_heap_fits(state, instance, &selection.path).await?;
         return Ok(selection.path);
+    }
+
+    // A server that has already reached its Done line is evidence, not a
+    // hypothesis. The exact-major rule arrived after people had working
+    // servers, and refusing to start one because the rule changed under it
+    // would be this app breaking something that worked. It runs, on the same
+    // footing as before, and says why once.
+    if fit == java::JavaFit::Exact {
+        if let Some(previous) = java::ran_before(&state.db, instance.id).await? {
+            if let Some(selection) =
+                java::select_for(state, instance.java_path.as_deref(), required, java::JavaFit::Floor)
+                    .await?
+            {
+                let found = java::probe_major(&selection.path).await;
+                let ran_on = previous
+                    .java_major
+                    .or(found)
+                    .map(|major| format!("Java {major}"))
+                    .unwrap_or_else(|| "a newer Java".to_string());
+                let message = format!(
+                    "This server has run on {ran_on} before, and {} {} is tested on Java \
+                     {required}. Starting it on {} because it has worked; the Java panel offers \
+                     the download.",
+                    instance.server_type.label(),
+                    instance.mc_version,
+                    found
+                        .map(|major| format!("Java {major}"))
+                        .unwrap_or_else(|| selection.path.display().to_string()),
+                );
+                tracing::warn!(
+                    instance = %instance.name,
+                    instance_id = instance.id,
+                    java = %selection.path.display(),
+                    required,
+                    found = found.unwrap_or(0),
+                    "grandfathered: this server has reached ready on this Java before"
+                );
+                report_choice(
+                    state,
+                    instance,
+                    &selection.path,
+                    launch::effective_heap_mb(instance),
+                    "kept from a start that worked",
+                )
+                .await;
+                if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
+                    buffer.push_system(&message);
+                }
+                check_heap_fits(state, instance, &selection.path).await?;
+                return Ok(selection.path);
+            }
+        }
     }
 
     // "No Java at all", "Java, but too old" and "Java, but not the one this
@@ -581,6 +641,7 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
             exited: exited.clone(),
             stop_requested: stop_requested.clone(),
             reached_ready: reached_ready.clone(),
+            java_major: java::probe_major(&java).await,
         },
     );
 
@@ -673,6 +734,15 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
                 .await;
             state.supervisor.reset_online(&instance.uuid);
             state.supervisor.mark_ready(&instance.uuid);
+            // Recorded so a later rule change cannot decide, on its own, that a
+            // server which demonstrably works is no longer allowed to start.
+            // The Java it ran on is part of the record, because that is the
+            // thing a stricter rule would be second-guessing.
+            let detail = state
+                .supervisor
+                .java_of(&instance.uuid)
+                .map(|major| format!("java={major}"));
+            let _ = record_event(&state.db, instance.id, "ready", detail.as_deref()).await;
             // If the app died between save-off and save-on, this is the first
             // moment a console exists to put it right.
             crate::backup::saveguard::recover_on_start(&state, instance.id).await;
@@ -1381,6 +1451,94 @@ mod tests {
         .execute(&state.db)
         .await
         .unwrap();
+    }
+
+    /// A Forge instance, a folder that is ready to run, and a Java that the
+    /// exact-major rule does not want.
+    async fn loader_case(dir: &Path, ready_before: bool) -> (AppState, Instance) {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        let state = AppState::new(pool, std::env::temp_dir());
+        let now = now_rfc3339();
+
+        let instance_dir = dir.join("modded");
+        std::fs::create_dir_all(&instance_dir).unwrap();
+        std::fs::write(instance_dir.join("server.jar"), b"jar").unwrap();
+
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, min_ram_mb, max_ram_mb, eula_accepted, installed_at,
+                last_started_at, created_at, updated_at)
+             VALUES ('u1', 'modded', ?, 'forge', '1.16.5', 'jar', '[]', '[]', 1024, 1024, 1, ?,
+                ?, ?, ?)",
+        )
+        .bind(instance_dir.to_string_lossy().to_string())
+        .bind(&now)
+        .bind(ready_before.then(|| now.clone()))
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        if ready_before {
+            sqlx::query(
+                "INSERT INTO instance_events (instance_id, ts, kind, detail)
+                 VALUES (1, ?, 'ready', 'java=17')",
+            )
+            .bind(&now)
+            .execute(&state.db)
+            .await
+            .unwrap();
+        }
+
+        // A Java 17 and nothing else: too new for a 1.16.5 loader under the rule.
+        sqlx::query(
+            "INSERT INTO java_runtimes (path, major, bits, source, valid, detected_at)
+             VALUES (?, 17, 64, 'common_dir', 1, ?)",
+        )
+        .bind("C:/Program Files/Java/jdk-17/bin/java.exe")
+        .bind(&now)
+        .execute(&state.db)
+        .await
+        .unwrap();
+
+        let instance = instance::get(&state.db, 1).await.unwrap();
+        (state, instance)
+    }
+
+    #[tokio::test]
+    async fn a_loader_that_has_already_run_keeps_starting_on_the_java_it_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, instance) = loader_case(dir.path(), true).await;
+
+        let chosen = preflight(&state, &instance)
+            .await
+            .expect("a server that has reached Done is not stopped by a rule change");
+        assert_eq!(chosen, Path::new("C:/Program Files/Java/jdk-17/bin/java.exe"));
+
+        // And it says so, once, where the person starting it will read it.
+        let console = state.supervisor.console(&instance.uuid);
+        let said = console.lock().unwrap().tail(50);
+        let message = said
+            .iter()
+            .find(|line| line.message.contains("has run on"))
+            .expect("the console explains why it started anyway");
+        assert!(message.message.contains("Java 17"), "{}", message.message);
+        assert!(message.message.contains("Java 8"), "{}", message.message);
+    }
+
+    #[tokio::test]
+    async fn a_loader_that_has_never_run_is_still_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (state, instance) = loader_case(dir.path(), false).await;
+
+        let err = preflight(&state, &instance)
+            .await
+            .expect_err("nothing here has ever worked, so the rule stands");
+        assert_eq!(err.kind(), "java_wrong_major");
+        let message = err.user_message();
+        assert!(message.contains("Java 8"), "{message}");
+        assert!(message.contains("Java 17"), "{message}");
     }
 
     #[tokio::test]

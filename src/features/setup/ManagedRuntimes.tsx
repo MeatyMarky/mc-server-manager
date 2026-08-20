@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Download, HardDrive, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, HardDrive, Pin, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/misc";
+import { useUpdateInstance } from "@/features/instances/queries";
 import { onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes, progressPercent } from "@/lib/format";
 import { ipc } from "@/lib/ipc";
@@ -175,6 +176,7 @@ export function JavaPlanNotice({
   serverType,
   recordedMajor,
   pinned,
+  instanceId,
 }: {
   mcVersion: string;
   /// Decides how strict the version rule is: the mod loaders want the exact
@@ -182,13 +184,31 @@ export function JavaPlanNotice({
   serverType: ServerType;
   recordedMajor?: number | null;
   pinned?: string | null;
+  /// The server this is about, when it exists yet. A server with a start behind
+  /// it is judged on that, and can be pinned straight from the warning.
+  instanceId?: number | null;
 }) {
   const queryClient = useQueryClient();
+  const update = useUpdateInstance();
   const [starting, setStarting] = useState(false);
 
   const plan = useQuery({
-    queryKey: ["java-plan", mcVersion, serverType, recordedMajor ?? null, pinned ?? null],
-    queryFn: () => ipc.javaPlanFor(mcVersion, serverType, recordedMajor ?? null, pinned ?? null),
+    queryKey: [
+      "java-plan",
+      mcVersion,
+      serverType,
+      recordedMajor ?? null,
+      pinned ?? null,
+      instanceId ?? null,
+    ],
+    queryFn: () =>
+      ipc.javaPlanFor(
+        mcVersion,
+        serverType,
+        recordedMajor ?? null,
+        pinned ?? null,
+        instanceId ?? null,
+      ),
     enabled: mcVersion.trim().length > 0,
   });
 
@@ -202,7 +222,35 @@ export function JavaPlanNotice({
   }, [queryClient]);
 
   if (!plan.data) return null;
-  const { requiredMajor, satisfied, offer, offerError, reason, warning } = plan.data;
+  const { requiredMajor, satisfied, offer, offerError, reason, warning, pinnablePath } =
+    plan.data;
+
+  /// Keeping the Java that already works is one click, because the alternative
+  /// — "open Settings, find the Java list, match the path" — is three screens
+  /// away from the sentence explaining why you would want to.
+  function keepThisJava() {
+    if (!instanceId || !pinnablePath) return;
+    update.mutate({
+      id: instanceId,
+      input: {
+        name: null,
+        mcVersion: null,
+        loaderVersion: null,
+        javaPath: pinnablePath,
+        jvmArgs: null,
+        serverArgs: null,
+        minRamMb: null,
+        maxRamMb: null,
+        autoStart: null,
+        autoRestart: null,
+        restartMax: null,
+        restartWindowS: null,
+        stopTimeoutS: null,
+        notes: null,
+        color: null,
+      },
+    });
+  }
 
   // The backend writes the sentence: which Java the release is tested on, what
   // this computer has, and what follows from the two. A verdict with no
@@ -213,10 +261,45 @@ export function JavaPlanNotice({
       <div className="grid gap-1">
         <p className="text-xs text-muted-foreground">{reason}</p>
         {warning ? (
-          <p className="flex items-start gap-2 rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--status-starting)]" aria-hidden />
-            <span>{warning}</span>
-          </p>
+          <div className="rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
+            <p className="flex items-start gap-2">
+              <AlertTriangle
+                className="mt-0.5 size-3.5 shrink-0 text-[var(--status-starting)]"
+                aria-hidden
+              />
+              <span>{warning}</span>
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {offer ? (
+                <Button
+                  size="sm"
+                  disabled={starting}
+                  onClick={() => {
+                    setStarting(true);
+                    ipc.managedRuntimeInstall(requiredMajor).catch((error: unknown) => {
+                      setStarting(false);
+                      toastError(error);
+                    });
+                  }}
+                >
+                  <Download />
+                  {starting
+                    ? "Downloading…"
+                    : `Download Java ${requiredMajor} (${formatBytes(offer.sizeBytes)})`}
+                </Button>
+              ) : null}
+              {instanceId && pinnablePath && pinnablePath !== pinned ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={update.isPending}
+                  onClick={keepThisJava}
+                >
+                  <Pin /> {update.isPending ? "Pinning…" : "Keep using this Java"}
+                </Button>
+              ) : null}
+            </div>
+          </div>
         ) : null}
       </div>
     );

@@ -17,9 +17,20 @@ fit: JavaFit,
 reason: string, 
 /**
  * Set when a runtime would be used that the rule does not prefer — a pin
- * against a loader's exact major, which is allowed but worth saying.
+ * against a loader's exact major, or a server grandfathered by a start
+ * that already worked. Allowed, and worth saying.
  */
 warning: string | null, 
+/**
+ * The Java this server has already reached its Done line on, when it has.
+ * The reason a stricter rule does not get to stop it.
+ */
+ranBeforeOn: number | null, 
+/**
+ * What would be pinned by the "keep using this Java" button, so the UI
+ * does not have to work it out.
+ */
+pinnablePath: string | null, 
 /**
  * The best major this computer could offer under a floor rule, when the
  * exact one is missing. Names what the user already has.

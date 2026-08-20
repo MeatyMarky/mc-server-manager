@@ -83,6 +83,7 @@ export function SettingsTab({ instance }: { instance: InstanceView }) {
         serverType={instance.serverType}
         recordedMajor={instance.javaMajor}
         pinned={instance.javaPath}
+        instanceId={instance.id}
       />
 
       <section className="grid gap-4">

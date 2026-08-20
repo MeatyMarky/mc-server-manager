@@ -55,8 +55,16 @@ pub struct JavaPlan {
     /// release is tested on, what this computer has, and what follows.
     pub reason: String,
     /// Set when a runtime would be used that the rule does not prefer — a pin
-    /// against a loader's exact major, which is allowed but worth saying.
+    /// against a loader's exact major, or a server grandfathered by a start
+    /// that already worked. Allowed, and worth saying.
     pub warning: Option<String>,
+    /// The Java this server has already reached its Done line on, when it has.
+    /// The reason a stricter rule does not get to stop it.
+    #[ts(type = "number | null")]
+    pub ran_before_on: Option<i64>,
+    /// What would be pinned by the "keep using this Java" button, so the UI
+    /// does not have to work it out.
+    pub pinnable_path: Option<String>,
     /// The best major this computer could offer under a floor rule, when the
     /// exact one is missing. Names what the user already has.
     #[ts(type = "number | null")]
@@ -103,6 +111,9 @@ pub async fn java_plan_for(
     server_type: ServerType,
     recorded_major: Option<i64>,
     pinned: Option<String>,
+    // `instance_id` is the instance this is about, when there is one: a server
+    // with a start behind it is judged on that, not on the rule alone.
+    instance_id: Option<i64>,
 ) -> AppResult<JavaPlan> {
     let required = crate::java::required_for(recorded_major, &mc_version);
     let fit = crate::java::fit_for(server_type);
@@ -115,6 +126,55 @@ pub async fn java_plan_for(
     let installed_major = crate::java::best_for(&state.db, required)
         .await?
         .map(|runtime| runtime.major);
+
+    // A server that has already reached "Done" keeps starting, whatever the
+    // rule now says — with the reason on screen and the download offered.
+    let grandfathered = match instance_id {
+        Some(id) if fit == JavaFit::Exact && selection.is_none() => {
+            crate::java::ran_before(&state.db, id).await?
+        }
+        _ => None,
+    };
+
+    if let Some(previous) = grandfathered {
+        let fallback =
+            crate::java::select_for(&state, pinned.as_deref(), required, JavaFit::Floor).await?;
+        if let Some(fallback) = fallback {
+            let found = crate::java::probe_major(&fallback.path).await;
+            let ran_on = previous.java_major.or(found);
+            let (offer, offer_error) = offer_for(&state, required, allowed).await;
+            return Ok(JavaPlan {
+                required_major: required,
+                fit,
+                reason: format!(
+                    "{mc_version} {} is tested on Java {required}.",
+                    label_for(server_type)
+                ),
+                warning: Some(match ran_on {
+                    Some(major) => format!(
+                        "This server has run on Java {major} before, so it still starts on it. \
+                         Java {required} is what {mc_version} {} is tested on — download it, or \
+                         keep using Java {major}.",
+                        label_for(server_type)
+                    ),
+                    None => format!(
+                        "This server has run before on the Java it has, so it still starts. \
+                         Java {required} is what {mc_version} {} is tested on.",
+                        label_for(server_type)
+                    ),
+                }),
+                ran_before_on: ran_on,
+                pinnable_path: Some(fallback.path.to_string_lossy().to_string()),
+                installed_major,
+                satisfied: true,
+                origin: Some("grandfathered".to_string()),
+                java_path: Some(fallback.path.to_string_lossy().to_string()),
+                offer,
+                offer_error,
+                downloads_allowed: allowed,
+            });
+        }
+    }
 
     if let Some(selection) = selection {
         let pinned_major = match selection.origin {
@@ -134,11 +194,17 @@ pub async fn java_plan_for(
             _ => None,
         };
 
+        let pinnable_path = warning
+            .is_some()
+            .then(|| selection.path.to_string_lossy().to_string());
+
         return Ok(JavaPlan {
             required_major: required,
             fit,
             reason: satisfied_reason(&mc_version, server_type, required, fit, &selection),
             warning,
+            ran_before_on: None,
+            pinnable_path,
             installed_major,
             satisfied: true,
             origin: Some(
@@ -158,30 +224,15 @@ pub async fn java_plan_for(
 
     // Nothing suitable: resolve what could be downloaded, naming the version
     // and the size, so the user is asked rather than told at launch time.
-    let (offer, offer_error) = if allowed {
-        match adoptium::resolve(
-            &state.http,
-            required,
-            adoptium::current_os(),
-            adoptium::current_arch(),
-        )
-        .await
-        {
-            Ok(candidate) => (Some(DownloadOffer::from(&candidate)), None),
-            Err(err) => (None, Some(err.user_message())),
-        }
-    } else {
-        (
-            None,
-            Some("This app is set to use only the Java already installed.".into()),
-        )
-    };
+    let (offer, offer_error) = offer_for(&state, required, allowed).await;
 
     Ok(JavaPlan {
         required_major: required,
         fit,
         reason: missing_reason(&mc_version, server_type, required, fit, installed_major),
         warning: None,
+        ran_before_on: None,
+        pinnable_path: None,
         installed_major,
         satisfied: false,
         origin: None,
@@ -190,6 +241,31 @@ pub async fn java_plan_for(
         offer_error,
         downloads_allowed: allowed,
     })
+}
+
+/// The download to offer for a required version, or why there is none.
+async fn offer_for(
+    state: &AppState,
+    required: i64,
+    allowed: bool,
+) -> (Option<DownloadOffer>, Option<String>) {
+    if !allowed {
+        return (
+            None,
+            Some("This app is set to use only the Java already installed.".into()),
+        );
+    }
+    match adoptium::resolve(
+        &state.http,
+        required,
+        adoptium::current_os(),
+        adoptium::current_arch(),
+    )
+    .await
+    {
+        Ok(candidate) => (Some(DownloadOffer::from(&candidate)), None),
+        Err(err) => (None, Some(err.user_message())),
+    }
 }
 
 /// How a server type is named in these sentences. "1.16.5 Forge", not

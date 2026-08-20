@@ -346,5 +346,13 @@ export const ipc = {
     serverType: ServerType,
     recordedMajor?: number | null,
     pinned?: string | null,
-  ) => invoke<JavaPlan>("java_plan_for", { mcVersion, serverType, recordedMajor, pinned }),
+    instanceId?: number | null,
+  ) =>
+    invoke<JavaPlan>("java_plan_for", {
+      mcVersion,
+      serverType,
+      recordedMajor,
+      pinned,
+      instanceId,
+    }),
 };

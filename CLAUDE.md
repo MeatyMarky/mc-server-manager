@@ -164,8 +164,19 @@ never to the winner afterwards: Java 8 sorts first, so a rule applied after the 
 substitute has its own error (`java_wrong_major`), because "Java 17 is installed" is not the
 same problem as "your Java is too old" and the fix is different.
 
+### A rule change never breaks a server that already worked
+The exact-major rule arrived after people had running servers, so a Forge instance that has
+reached its "Done" line on Java 17 is **grandfathered**: it starts on the same Java as
+before, says why once in its console, and is offered the download — it is never refused.
+`java::ran_before` is the evidence, in two forms because the first only exists going forward:
+a `ready` event (recorded on every readiness, with `java=<major>` in its detail), or — for
+history an older build left — `last_started_at` plus a clean `stopped` event. A server that
+has only ever crashed on the way up gets the hard refusal, which is the case the rule is for.
+
 The reasoning is a sentence built in `java_plan_for`, not a verdict: "1.16.5 Forge is tested
-on Java 8; this computer has Java 17…", with the download offer beneath it.
+on Java 8; this computer has Java 17…", with the download offer beneath it. Where the plan
+carries a warning it also carries `pinnable_path`, so "keep using this Java" is one click
+from the sentence explaining it rather than three screens away in Settings.
 
 ### The required Java version is a floor, and the chosen binary is asked directly
 `java::required_for(recorded, mc_version)` takes the higher of the number recorded at

@@ -164,6 +164,72 @@ pub enum Origin {
     System,
 }
 
+/// Whether this server has a start behind it that reached "Done", and the Java
+/// major it did that on.
+///
+/// The strict rule for the mod loaders arrived after people already had working
+/// servers. A Forge 1.16.5 instance that has reached its Done line on Java 17 is
+/// evidence, not a hypothesis: refusing to start it because a rule changed under
+/// it would be the app breaking something that worked.
+///
+/// Two sources, because the first only exists going forward:
+///
+/// 1. a `ready` event, which records the Java major it ran on;
+/// 2. failing that, a start plus a clean `stopped` event — all the history an
+///    older build left behind, and enough to say the server ran.
+pub async fn ran_before(pool: &SqlitePool, instance_id: i64) -> AppResult<Option<Grandfathered>> {
+    let ready: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT detail FROM instance_events
+         WHERE instance_id = ? AND kind = 'ready'
+         ORDER BY ts DESC LIMIT 1",
+    )
+    .bind(instance_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some((detail,)) = ready {
+        return Ok(Some(Grandfathered {
+            java_major: detail.as_deref().and_then(parse_ready_detail),
+        }));
+    }
+
+    // An older build recorded no readiness, so the evidence is a start that
+    // ended in a clean stop rather than in a crash.
+    let legacy: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(*) FROM instance_events
+         WHERE instance_id = ? AND kind = 'stopped'",
+    )
+    .bind(instance_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let started: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT last_started_at FROM instances WHERE id = ?")
+            .bind(instance_id)
+            .fetch_optional(pool)
+            .await?;
+
+    let stopped_cleanly = legacy.map(|(count,)| count > 0).unwrap_or(false);
+    let has_started = started.and_then(|(at,)| at).is_some();
+
+    Ok((stopped_cleanly && has_started).then_some(Grandfathered { java_major: None }))
+}
+
+/// What is known about a server's last successful start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grandfathered {
+    /// The Java it ran on, when the record says. Older history does not.
+    pub java_major: Option<i64>,
+}
+
+/// The Java major out of a `ready` event's detail, which reads "java=17".
+pub fn parse_ready_detail(detail: &str) -> Option<i64> {
+    detail
+        .split(';')
+        .filter_map(|part| part.trim().strip_prefix("java="))
+        .find_map(|value| value.trim().parse().ok())
+}
+
 /// The runtime a launch will use, and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Selection {
@@ -521,6 +587,90 @@ mod tests {
             Some(21)
         );
         assert!(best_of(installed, 17, JavaFit::Exact).is_none());
+    }
+
+    async fn instance_row(pool: &SqlitePool, started: bool) {
+        let now = crate::db::now_rfc3339();
+        sqlx::query(
+            "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
+                jvm_args, server_args, last_started_at, created_at, updated_at)
+             VALUES ('u1', 'modded', 'Z:/modded', 'forge', '1.16.5', 'jar', '[]', '[]', ?, ?, ?)",
+        )
+        .bind(started.then(|| now.clone()))
+        .bind(&now)
+        .bind(&now)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn event(pool: &SqlitePool, kind: &str, detail: Option<&str>) {
+        sqlx::query("INSERT INTO instance_events (instance_id, ts, kind, detail) VALUES (1, ?, ?, ?)")
+            .bind(crate::db::now_rfc3339())
+            .bind(kind)
+            .bind(detail)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_server_that_reached_ready_is_grandfathered_with_the_java_it_used() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        instance_row(&pool, true).await;
+        event(&pool, "ready", Some("java=17")).await;
+
+        let found = ran_before(&pool, 1).await.unwrap().expect("it has run");
+        assert_eq!(found.java_major, Some(17));
+    }
+
+    #[tokio::test]
+    async fn a_server_that_never_reached_ready_is_not() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        instance_row(&pool, true).await;
+        // Started and died on the way up: the exact case the strict rule is for.
+        event(&pool, "started", None).await;
+        event(&pool, "crashed", Some("exited before ready")).await;
+
+        assert_eq!(ran_before(&pool, 1).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_brand_new_server_is_not_grandfathered() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        instance_row(&pool, false).await;
+        assert_eq!(ran_before(&pool, 1).await.unwrap(), None);
+    }
+
+    /// History from a build that recorded no readiness: a start plus a clean
+    /// stop is the whole of what it left behind, and it is enough.
+    #[tokio::test]
+    async fn older_history_counts_when_it_shows_a_clean_stop() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        instance_row(&pool, true).await;
+        event(&pool, "started", None).await;
+        event(&pool, "stopped", Some("stopped cleanly")).await;
+
+        let found = ran_before(&pool, 1).await.unwrap().expect("it ran");
+        // Which Java, nobody recorded. The warning says so rather than guessing.
+        assert_eq!(found.java_major, None);
+    }
+
+    #[tokio::test]
+    async fn a_clean_stop_without_a_start_is_not_evidence() {
+        let pool = crate::db::connect_in_memory().await.unwrap();
+        instance_row(&pool, false).await;
+        event(&pool, "stopped", None).await;
+        assert_eq!(ran_before(&pool, 1).await.unwrap(), None);
+    }
+
+    #[test]
+    fn the_java_version_is_read_out_of_a_ready_event() {
+        assert_eq!(parse_ready_detail("java=17"), Some(17));
+        assert_eq!(parse_ready_detail("java=8; took=1.8s"), Some(8));
+        assert_eq!(parse_ready_detail("took=1.8s"), None);
+        assert_eq!(parse_ready_detail(""), None);
+        assert_eq!(parse_ready_detail("java=unknown"), None);
     }
 
     #[test]
