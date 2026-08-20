@@ -201,10 +201,15 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         if let Some(requested_mb) = heap_mb {
             check_heap(state, &resolved, requested_mb).await?;
         }
+        // A start script runs `java` from PATH, which the user controls the same
+        // way a pin is under their control: warned about, not refused.
         check_java_version(
+            state,
             instance,
             &resolved,
             java::required_for(instance.java_major, &instance.mc_version),
+            java::fit_for(instance.server_type),
+            java::Origin::Pinned,
         )
         .await?;
         return Ok(resolved);
@@ -213,6 +218,9 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
     // The recorded number and the version table, whichever is higher: a stale
     // row must not be able to lower the requirement.
     let required = java::required_for(instance.java_major, &instance.mc_version);
+    // Vanilla and the Bukkit family take anything newer; the mod loaders want
+    // the major their Minecraft release was built against.
+    let fit = java::fit_for(instance.server_type);
 
     // A pin that points at nothing is an error rather than a silent fallback:
     // the user chose it, so its disappearance is worth saying out loud.
@@ -226,7 +234,7 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
     }
 
     if let Some(selection) =
-        java::select_for(state, instance.java_path.as_deref(), required).await?
+        java::select_for(state, instance.java_path.as_deref(), required, fit).await?
     {
         let how = match selection.origin {
             java::Origin::Pinned => "pinned for this server",
@@ -243,26 +251,33 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
         .await;
         // Whatever it came from, it is asked what it is and refused if it
         // cannot run this server — a managed runtime included.
-        check_java_version(instance, &selection.path, required).await?;
+        check_java_version(state, instance, &selection.path, required, fit, selection.origin)
+            .await?;
         check_heap_fits(state, instance, &selection.path).await?;
         return Ok(selection.path);
     }
 
-    // "No Java at all" and "Java, but too old" have different fixes, and the
-    // second is the one that confuses people: they installed Java, so why is
-    // the app still complaining?
+    // "No Java at all", "Java, but too old" and "Java, but not the one this
+    // loader wants" have three different fixes, and the last two are the ones
+    // that confuse people: they installed Java, so why is the app complaining?
     let newest = java::list(&state.db)
         .await?
         .into_iter()
         .map(|runtime| runtime.major)
         .max();
-    Err(match newest {
-        Some(found) => AppError::JavaTooOld {
+    Err(match (newest, fit) {
+        (Some(found), java::JavaFit::Exact) if found != required => AppError::JavaWrongMajor {
+            required,
+            found,
+            mc_version: instance.mc_version.clone(),
+            server_type: instance.server_type.label().to_string(),
+        },
+        (Some(found), _) => AppError::JavaTooOld {
             required,
             found,
             mc_version: instance.mc_version.clone(),
         },
-        None => AppError::JavaNotFound { required },
+        (None, _) => AppError::JavaNotFound { required },
     })
 }
 
@@ -273,9 +288,12 @@ async fn preflight(state: &AppState, instance: &Instance) -> AppResult<PathBuf> 
 /// `UnsupportedClassVersionError` several seconds later — a message that names
 /// class file numbers rather than Java versions.
 async fn check_java_version(
+    state: &AppState,
     instance: &Instance,
     java: &Path,
     required: i64,
+    fit: java::JavaFit,
+    origin: java::Origin,
 ) -> AppResult<()> {
     let Some(found) = java::probe_major(java).await else {
         // Unreadable is not proof of anything; the launch carries on and the
@@ -284,13 +302,49 @@ async fn check_java_version(
         return Ok(());
     };
 
-    if java::satisfies(found, required) {
+    // Too old is always a refusal, whoever chose it: the server cannot load its
+    // own class files, and a pin is not permission for that.
+    if !java::satisfies(found, required) {
+        return Err(AppError::JavaTooOld {
+            required,
+            found,
+            mc_version: instance.mc_version.clone(),
+        });
+    }
+
+    if fit.accepts(found, required) {
         return Ok(());
     }
-    Err(AppError::JavaTooOld {
+
+    // Newer than a loader wants. A pin is the user saying they know better, so
+    // it runs — with the reason on the record rather than a surprise later.
+    if origin == java::Origin::Pinned {
+        let message = format!(
+            "Running on Java {found}, though {} {} is tested on Java {required}. Mod loaders \
+             rewrite code as they load it, so a crash inside a mod may be this rather than the \
+             mod.",
+            instance.server_type.label(),
+            instance.mc_version
+        );
+        tracing::warn!(
+            instance = %instance.name,
+            instance_id = instance.id,
+            java = %java.display(),
+            found,
+            required,
+            "pinned Java is not the major this loader was tested on"
+        );
+        if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
+            buffer.push_system(&message);
+        }
+        return Ok(());
+    }
+
+    Err(AppError::JavaWrongMajor {
         required,
         found,
         mc_version: instance.mc_version.clone(),
+        server_type: instance.server_type.label().to_string(),
     })
 }
 
@@ -1525,16 +1579,32 @@ mod tests {
         let Some(java) = crate::java::detect::java_on_path() else {
             return;
         };
-        let err = check_java_version(&instance, &java, 999)
-            .await
-            .expect_err("no JVM is version 999");
+        let err = check_java_version(
+            &state,
+            &instance,
+            &java,
+            999,
+            java::JavaFit::Floor,
+            java::Origin::System,
+        )
+        .await
+        .expect_err("no JVM is version 999");
         assert_eq!(err.kind(), "java_too_old");
         let message = err.user_message();
         assert!(message.contains("26.2"), "{message}");
         assert!(message.contains("999"), "{message}");
 
         // And the same binary passes a requirement it does satisfy.
-        assert!(check_java_version(&instance, &java, 8).await.is_ok());
+        assert!(check_java_version(
+            &state,
+            &instance,
+            &java,
+            8,
+            java::JavaFit::Floor,
+            java::Origin::System
+        )
+        .await
+        .is_ok());
     }
 
     #[tokio::test]
@@ -1556,9 +1626,16 @@ mod tests {
         let instance = instance::get(&state.db, 1).await.unwrap();
 
         assert!(
-            check_java_version(&instance, Path::new("/nowhere/bin/java"), 25)
-                .await
-                .is_ok(),
+            check_java_version(
+                &state,
+                &instance,
+                Path::new("/nowhere/bin/java"),
+                25,
+                java::JavaFit::Floor,
+                java::Origin::System
+            )
+            .await
+            .is_ok(),
             "an unanswerable probe is not proof of anything"
         );
     }

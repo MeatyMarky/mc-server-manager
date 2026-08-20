@@ -76,6 +76,9 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
     // answer but never lowers it — a stale or wrong record would otherwise let
     // a server be run on a JVM that cannot load its class files.
     let required = java::required_for(instance.java_major, &instance.mc_version);
+    // The mod loaders want the major their release was built against; vanilla
+    // and the Bukkit family take anything newer.
+    let fit = java::fit_for(instance.server_type);
 
     if let Some(pinned) = instance.java_path.clone() {
         let known = java::list(&state.db)
@@ -85,7 +88,11 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
 
         return Ok(match known {
             Some(runtime) => {
+                // Too old is a mismatch under either rule. Newer than a loader
+                // wants is a pin the user is entitled to make, so it reads as a
+                // caution rather than a fault.
                 let version_ok = java::satisfies(runtime.major, required);
+                let fits_rule = fit.accepts(runtime.major, required);
                 // Bitness is checked here too: a pinned 32-bit runtime satisfies
                 // the version and still cannot run the server, which is exactly
                 // how it went unnoticed.
@@ -94,6 +101,15 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
                     Some(format!(
                         "This instance is pinned to Java {}, but Minecraft {} needs Java {required}.",
                         runtime.major, instance.mc_version
+                    ))
+                } else if !fits_rule {
+                    Some(format!(
+                        "This server is pinned to Java {}, and {} {} is tested on Java {required}. \
+                         It will run, but a mod loader on the wrong Java usually fails somewhere \
+                         inside a mod rather than saying what is wrong.",
+                        runtime.major,
+                        instance.server_type.label(),
+                        instance.mc_version
                     ))
                 } else {
                     runtime.unsuitable_reason().map(|reason| {
@@ -111,6 +127,9 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
                     selected: Some(runtime),
                     pinned_path: Some(pinned),
                     pinned_valid: true,
+                    // A pin that merely disagrees with the loader rule is not a
+                    // mismatch: the server starts, and the sentence above says why
+                    // it might not behave.
                     mismatch: !version_ok || !width_ok,
                     last_scan_at: last_scan_at.clone(),
                     scan_is_stale,
@@ -131,7 +150,7 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
         });
     }
 
-    let best = java::best_for(&state.db, required).await?;
+    let best = java::best_of(java::list(&state.db).await?, required, fit);
     // When nothing is selectable, say whether the machine has *no* Java of that
     // version or only 32-bit ones — the fix is different.
     let excluded_32bit = best.is_none()
@@ -147,6 +166,14 @@ pub async fn java_status(state: State<'_, AppState>, id: i64) -> AppResult<JavaS
                 format!(
                     "The only Java {required} on this computer is 32-bit, which cannot run a \
                      server. Install a 64-bit JDK and rescan."
+                )
+            } else if fit == java::JavaFit::Exact {
+                // Not "no Java": the machine may have plenty, none of it the
+                // major this loader was built against.
+                format!(
+                    "{} {} is tested on Java {required}, and no Java {required} is installed.                      The app can download it.",
+                    instance.server_type.label(),
+                    instance.mc_version
                 )
             } else {
                 format!(

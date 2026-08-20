@@ -80,6 +80,7 @@ export function SettingsTab({ instance }: { instance: InstanceView }) {
       <JavaSettings instance={instance} />
       <JavaPlanNotice
         mcVersion={instance.mcVersion}
+        serverType={instance.serverType}
         recordedMajor={instance.javaMajor}
         pinned={instance.javaPath}
       />

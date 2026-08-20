@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, HardDrive, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, HardDrive, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -9,7 +9,7 @@ import { onTaskDone, onTaskProgress } from "@/lib/events";
 import { formatBytes, progressPercent } from "@/lib/format";
 import { ipc } from "@/lib/ipc";
 import { toastError } from "@/lib/toast";
-import type { ManagedRuntime } from "@/lib/types";
+import type { ManagedRuntime, ServerType } from "@/lib/types";
 
 /**
  * JDKs this app downloaded, so a server does not depend on what happens to be
@@ -172,10 +172,14 @@ export function ManagedRuntimes() {
  */
 export function JavaPlanNotice({
   mcVersion,
+  serverType,
   recordedMajor,
   pinned,
 }: {
   mcVersion: string;
+  /// Decides how strict the version rule is: the mod loaders want the exact
+  /// major their Minecraft release was built against.
+  serverType: ServerType;
   recordedMajor?: number | null;
   pinned?: string | null;
 }) {
@@ -183,8 +187,8 @@ export function JavaPlanNotice({
   const [starting, setStarting] = useState(false);
 
   const plan = useQuery({
-    queryKey: ["java-plan", mcVersion, recordedMajor ?? null, pinned ?? null],
-    queryFn: () => ipc.javaPlanFor(mcVersion, recordedMajor ?? null, pinned ?? null),
+    queryKey: ["java-plan", mcVersion, serverType, recordedMajor ?? null, pinned ?? null],
+    queryFn: () => ipc.javaPlanFor(mcVersion, serverType, recordedMajor ?? null, pinned ?? null),
     enabled: mcVersion.trim().length > 0,
   });
 
@@ -198,27 +202,29 @@ export function JavaPlanNotice({
   }, [queryClient]);
 
   if (!plan.data) return null;
-  const { requiredMajor, satisfied, origin, offer, offerError } = plan.data;
+  const { requiredMajor, satisfied, offer, offerError, reason, warning } = plan.data;
 
+  // The backend writes the sentence: which Java the release is tested on, what
+  // this computer has, and what follows from the two. A verdict with no
+  // reasoning is what sent people to a forum to ask why Java 17 was not good
+  // enough for their 1.16.5 Forge server.
   if (satisfied) {
     return (
-      <p className="text-xs text-muted-foreground">
-        Needs Java {requiredMajor} —{" "}
-        {origin === "managed"
-          ? "using the copy this app downloaded"
-          : origin === "pinned"
-            ? "using the runtime pinned for this server"
-            : "found on this computer"}
-        .
-      </p>
+      <div className="grid gap-1">
+        <p className="text-xs text-muted-foreground">{reason}</p>
+        {warning ? (
+          <p className="flex items-start gap-2 rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--status-starting)]" aria-hidden />
+            <span>{warning}</span>
+          </p>
+        ) : null}
+      </div>
     );
   }
 
   return (
     <div className="rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 p-3 text-xs">
-      <p className="font-medium">
-        This version needs Java {requiredMajor}, which is not installed.
-      </p>
+      <p className="font-medium">{reason}</p>
       {offer ? (
         <>
           <p className="mt-1 text-muted-foreground">

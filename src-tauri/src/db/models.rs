@@ -34,6 +34,18 @@ impl ServerType {
         !matches!(self, ServerType::Vanilla)
     }
 
+    /// How this type is written in a sentence: "1.16.5 Forge", "1.21 Paper".
+    pub fn label(self) -> &'static str {
+        match self {
+            ServerType::Vanilla => "Vanilla",
+            ServerType::Paper => "Paper",
+            ServerType::Purpur => "Purpur",
+            ServerType::Fabric => "Fabric",
+            ServerType::Forge => "Forge",
+            ServerType::NeoForge => "NeoForge",
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             ServerType::Vanilla => "vanilla",

@@ -1117,7 +1117,12 @@ async fn a_managed_jdk_downloads_unpacks_and_reports_its_version() {
     assert_eq!(listed[0].feature_version, 17);
     assert!(managed::total_size(&state).await.unwrap() > 50_000_000);
 
-    let chosen = mc_server_manager_lib::java::select_for(&state, None, 17)
+    let chosen = mc_server_manager_lib::java::select_for(
+        &state,
+        None,
+        17,
+        mc_server_manager_lib::java::JavaFit::Floor,
+    )
         .await
         .unwrap()
         .expect("something satisfies 17");

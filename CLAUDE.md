@@ -144,9 +144,28 @@ before the pick (`java::best_of`), never after it: the managed Java 8 is the *lo
 that satisfies a 1.16 server, and rejecting the winner afterwards reported "nothing
 suitable" while a usable system Java 17 sat behind it in the list.
 
-The requirement is a floor, so any usable JDK at or above it satisfies an instance and no
-offer is made. On a machine with a newer JDK, the offer is therefore only reachable for a
-version whose requirement *nothing* installed meets.
+### How strict the Java version is depends on the server type
+`java::fit_for` decides. Vanilla, Paper and Purpur take **a floor**: any usable JDK at or
+above the requirement, lowest first, because they are plain Java programs and a 1.16 server
+on Java 17 behaves. Fabric, Forge and NeoForge take **the exact major** their Minecraft
+release was built against: Mixin rewrites bytecode as it loads, and a class file format it
+does not know about fails somewhere inside a third-party mod rather than saying what is
+wrong. So a 1.16.5 Forge server gets Java 8 or an offer to download it — never a silent
+Java 17.
+
+A pin still wins under either rule, because it is the user saying they know better, but it
+is said out loud: the create dialog shows a warning, `java_status` explains it, and preflight
+writes a line into the console before the server starts. Too *old* stays a refusal whoever
+chose it — a pin is not permission to run a server on a JVM that cannot load its class files.
+
+`JavaFit::accepts` is the whole rule, and `best_of` applies it to the **list** before picking,
+never to the winner afterwards: Java 8 sorts first, so a rule applied after the pick reports
+"nothing suitable" for a Java 17 requirement on a machine that has both. Refusing to
+substitute has its own error (`java_wrong_major`), because "Java 17 is installed" is not the
+same problem as "your Java is too old" and the fix is different.
+
+The reasoning is a sentence built in `java_plan_for`, not a verdict: "1.16.5 Forge is tested
+on Java 8; this computer has Java 17…", with the download offer beneath it.
 
 ### The required Java version is a floor, and the chosen binary is asked directly
 `java::required_for(recorded, mc_version)` takes the higher of the number recorded at

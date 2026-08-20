@@ -19,7 +19,7 @@ use crate::db::now_rfc3339;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
-pub use version::{required_java_for, satisfies, JavaVersionInfo};
+pub use version::{fit_for, required_java_for, satisfies, JavaFit, JavaVersionInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, TS)]
 #[sqlx(rename_all = "snake_case")]
@@ -90,7 +90,7 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
 /// Best runtime for a required major version: the lowest major that still
 /// satisfies the requirement, so a 1.16 server does not get Java 26.
 pub async fn best_for(pool: &SqlitePool, required: i64) -> AppResult<Option<JavaRuntime>> {
-    Ok(best_of(list(pool).await?, required))
+    Ok(best_of(list(pool).await?, required, JavaFit::Floor))
 }
 
 /// The same choice, over a list a caller has already narrowed.
@@ -100,11 +100,17 @@ pub async fn best_for(pool: &SqlitePool, required: i64) -> AppResult<Option<Java
 /// Java 8 is the lowest major that satisfies a 1.16 server, so rejecting the
 /// winner afterwards would answer "nothing suitable" while a perfectly good
 /// system Java 17 sat behind it in the list.
-pub fn best_of(mut runtimes: Vec<JavaRuntime>, required: i64) -> Option<JavaRuntime> {
+pub fn best_of(
+    mut runtimes: Vec<JavaRuntime>,
+    required: i64,
+    fit: JavaFit,
+) -> Option<JavaRuntime> {
     // 32-bit runtimes are excluded here rather than at launch: picking one
     // automatically produces "Invalid maximum heap size" from the JVM, which
     // tells the user nothing about which Java was used or why.
-    runtimes.retain(|r| satisfies(r.major, required) && r.usable_for_servers());
+    runtimes.retain(|r| fit.accepts(r.major, required) && r.usable_for_servers());
+    // Lowest first under either rule: closest to what the release was tested
+    // on. Under `Exact` there is only one major left to choose between anyway.
     runtimes.sort_by_key(|r| r.major);
     runtimes.into_iter().next()
 }
@@ -170,16 +176,21 @@ pub struct Selection {
 /// Picks the runtime for an instance, in the order that respects the user's
 /// choices before this app's own:
 ///
-/// 1. the pin, when it is set and points at something;
-/// 2. a managed runtime for the required version — this app downloaded it for
-///    exactly this, and it cannot have been changed underneath;
-/// 3. a system JDK that satisfies the requirement.
+/// 1. the pin, when it is set and points at something — a pin is the user
+///    saying they know better, and it wins even against `JavaFit::Exact`;
+/// 2. a managed runtime that fits — this app downloaded it for exactly this,
+///    and it cannot have been changed underneath;
+/// 3. a system JDK that fits.
 ///
-/// `None` means nothing suitable exists, which is the cue to offer a download.
+/// `fit` decides what "fits" means: at-or-above the requirement for vanilla and
+/// the Bukkit family, the exact major for the mod loaders. `None` means nothing
+/// suitable exists, which is the cue to offer a download rather than to
+/// substitute a version the loader was never tested against.
 pub async fn select_for(
     state: &AppState,
     pinned: Option<&str>,
     required: i64,
+    fit: JavaFit,
 ) -> AppResult<Option<Selection>> {
     if let Some(pinned) = pinned.filter(|path| std::path::Path::new(path).is_file()) {
         return Ok(Some(Selection {
@@ -189,7 +200,7 @@ pub async fn select_for(
         }));
     }
 
-    if let Some(runtime) = managed::for_version(state, required).await? {
+    if let Some(runtime) = managed::for_version(state, required, fit).await? {
         return Ok(Some(Selection {
             path: std::path::PathBuf::from(runtime.java_path),
             origin: Origin::Managed,
@@ -208,7 +219,10 @@ pub async fn select_for(
         });
     }
 
-    Ok(best_of(candidates, required).map(|runtime| Selection {
+    // Narrow first, pick second — under `Exact` as much as under `Floor`. A
+    // rule applied to the winner instead of to the list answers "nothing
+    // suitable" whenever the runtime it rejects happened to rank first.
+    Ok(best_of(candidates, required, fit).map(|runtime| Selection {
         path: std::path::PathBuf::from(runtime.path),
         origin: Origin::System,
         major: Some(runtime.major),
@@ -433,6 +447,7 @@ mod tests {
                 runtime(21, "C:/jdk-21/bin/java.exe", Some(64)),
             ],
             8,
+            JavaFit::Floor,
         );
         // A 1.16 server takes the oldest thing that can still run it.
         assert_eq!(found.map(|runtime| runtime.major), Some(17));
@@ -440,12 +455,72 @@ mod tests {
 
     #[test]
     fn a_32_bit_runtime_is_never_the_answer_even_when_it_is_the_only_match() {
-        let found = best_of(vec![runtime(8, "C:/Program Files (x86)/java.exe", Some(32))], 8);
+        let found = best_of(
+            vec![runtime(8, "C:/Program Files (x86)/java.exe", Some(32))],
+            8,
+            JavaFit::Floor,
+        );
         assert!(found.is_none(), "it cannot address the heap a server is given");
 
         // And an unknown width is treated the same until the next scan proves it.
-        let unknown = best_of(vec![runtime(8, "C:/java.exe", None)], 8);
+        let unknown = best_of(vec![runtime(8, "C:/java.exe", None)], 8, JavaFit::Floor);
         assert!(unknown.is_none());
+    }
+
+    #[test]
+    fn a_loader_takes_the_exact_major_and_a_plain_server_takes_the_lowest_above_it() {
+        let installed = || {
+            vec![
+                runtime(8, "C:/jdk-8/bin/java.exe", Some(64)),
+                runtime(17, "C:/jdk-17/bin/java.exe", Some(64)),
+                runtime(21, "C:/jdk-21/bin/java.exe", Some(64)),
+            ]
+        };
+
+        // 1.16.5 asks for Java 8. Both rules pick Java 8 when it is there.
+        assert_eq!(
+            best_of(installed(), 8, JavaFit::Floor).map(|r| r.major),
+            Some(8)
+        );
+        assert_eq!(
+            best_of(installed(), 8, JavaFit::Exact).map(|r| r.major),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn a_loader_refuses_to_substitute_a_newer_java() {
+        // The machine that started this: a 1.16.5 Forge server and no Java 8.
+        let without_8 = vec![
+            runtime(17, "C:/jdk-17/bin/java.exe", Some(64)),
+            runtime(21, "C:/jdk-21/bin/java.exe", Some(64)),
+        ];
+
+        // A plain server is happy on Java 17 and no download is offered.
+        assert_eq!(
+            best_of(without_8.clone(), 8, JavaFit::Floor).map(|r| r.major),
+            Some(17)
+        );
+        // A loader is not, and `None` is what turns into the offer rather than
+        // a substitution that fails inside somebody's mod an hour later.
+        assert!(best_of(without_8, 8, JavaFit::Exact).is_none());
+    }
+
+    #[test]
+    fn the_rule_narrows_the_list_before_the_pick() {
+        // Ordering, not filtering, is what this checks: Java 8 sorts first
+        // under both rules, so a rule applied to the winner instead of to the
+        // list would answer "nothing suitable" for a 17-requiring server that
+        // has a perfectly good Java 21 behind the 8.
+        let installed = vec![
+            runtime(8, "C:/jdk-8/bin/java.exe", Some(64)),
+            runtime(21, "C:/jdk-21/bin/java.exe", Some(64)),
+        ];
+        assert_eq!(
+            best_of(installed.clone(), 17, JavaFit::Floor).map(|r| r.major),
+            Some(21)
+        );
+        assert!(best_of(installed, 17, JavaFit::Exact).is_none());
     }
 
     #[test]
@@ -686,7 +761,7 @@ mod tests {
 
         // Only a system JDK to start with.
         seed(&state.db, "/system/jdk-25/bin/java", 25).await;
-        let system = select_for(&state, None, 25).await.unwrap().unwrap();
+        let system = select_for(&state, None, 25, JavaFit::Floor).await.unwrap().unwrap();
         assert_eq!(system.origin, Origin::System);
         assert_eq!(system.path, std::path::PathBuf::from("/system/jdk-25/bin/java"));
 
@@ -694,14 +769,14 @@ mod tests {
         // there for exactly this, and nothing else can have changed it.
         let managed_path = managed::install_dir(dir.path(), 25).join("bin").join("java");
         register_managed(&state, 25, &managed_path).await;
-        let chosen = select_for(&state, None, 25).await.unwrap().unwrap();
+        let chosen = select_for(&state, None, 25, JavaFit::Floor).await.unwrap().unwrap();
         assert_eq!(chosen.origin, Origin::Managed);
         assert_eq!(chosen.path, managed_path);
 
         // An explicit pin beats both, because the user asked for it.
         let pinned = dir.path().join("pinned").join("bin").join("java");
         touch(&pinned);
-        let chosen = select_for(&state, Some(&pinned.to_string_lossy()), 25)
+        let chosen = select_for(&state, Some(&pinned.to_string_lossy()), 25, JavaFit::Floor)
             .await
             .unwrap()
             .unwrap();
@@ -717,7 +792,7 @@ mod tests {
 
         // preflight turns this into JavaPinnedMissing; selection simply does not
         // pretend the pin was honoured.
-        let chosen = select_for(&state, Some("Z:/gone/bin/java"), 25)
+        let chosen = select_for(&state, Some("Z:/gone/bin/java"), 25, JavaFit::Floor)
             .await
             .unwrap()
             .unwrap();
@@ -731,15 +806,15 @@ mod tests {
 
         // A machine with only Java 17 cannot run a server needing 25.
         seed(&state.db, "/system/jdk-17/bin/java", 17).await;
-        assert!(select_for(&state, None, 25).await.unwrap().is_none());
+        assert!(select_for(&state, None, 25, JavaFit::Floor).await.unwrap().is_none());
 
         // A managed 21 does not satisfy 25 either.
         let managed_path = managed::install_dir(dir.path(), 21).join("bin").join("java");
         register_managed(&state, 21, &managed_path).await;
-        assert!(select_for(&state, None, 25).await.unwrap().is_none());
+        assert!(select_for(&state, None, 25, JavaFit::Floor).await.unwrap().is_none());
 
         // But it does satisfy 17.
-        let chosen = select_for(&state, None, 17).await.unwrap().unwrap();
+        let chosen = select_for(&state, None, 17, JavaFit::Floor).await.unwrap().unwrap();
         assert_eq!(chosen.origin, Origin::Managed);
     }
 
@@ -759,7 +834,7 @@ mod tests {
         .await
         .unwrap();
 
-        let chosen = select_for(&state, None, 25).await.unwrap().unwrap();
+        let chosen = select_for(&state, None, 25, JavaFit::Floor).await.unwrap().unwrap();
         assert_eq!(chosen.origin, Origin::System, "a deleted folder is not a runtime");
     }
 }

@@ -14,7 +14,7 @@ use std::path::Path;
 use mc_server_manager_lib::db;
 use mc_server_manager_lib::db::models::ServerType;
 use mc_server_manager_lib::instance::{self, crud, CreateInstanceInput};
-use mc_server_manager_lib::java::{self, adoptium, managed, Origin};
+use mc_server_manager_lib::java::{self, adoptium, managed, JavaFit, Origin};
 use mc_server_manager_lib::state::AppState;
 use tokio_util::sync::CancellationToken;
 
@@ -100,13 +100,17 @@ async fn a_1_16_5_server_gets_java_8_from_the_app_and_keeps_it() {
     let required = java::required_for(row.java_major, MC_VERSION);
     assert_eq!(required, REQUIRED_MAJOR, "1.16.5 asks for Java 8");
 
+    // Vanilla takes anything newer; the loaders want this exact major.
+    let fit = java::fit_for(ServerType::Vanilla);
+    assert_eq!(fit, JavaFit::Floor);
+
     // 3. What the create dialog would show before anything is downloaded.
     //
     // The requirement is a floor, so any usable JDK at or above it satisfies
     // the instance and the offer stays hidden. On a machine with a newer JDK
     // and no 64-bit Java 8, that means the offer is not reachable through this
     // version at all — which is worth printing rather than asserting away.
-    let before = java::select_for(&state, None, required).await.unwrap();
+    let before = java::select_for(&state, None, required, fit).await.unwrap();
     match &before {
         None => println!("\nnothing installed satisfies Java 8, so the app offers a download"),
         Some(selection) => println!(
@@ -160,7 +164,7 @@ async fn a_1_16_5_server_gets_java_8_from_the_app_and_keeps_it() {
     assert_eq!(probed, Some(REQUIRED_MAJOR), "the runtime answers -version as Java 8");
 
     // 5. Selection now prefers it, and says where it came from.
-    let chosen = java::select_for(&state, None, required)
+    let chosen = java::select_for(&state, None, required, fit)
         .await
         .unwrap()
         .expect("something is selected now");
@@ -211,7 +215,7 @@ async fn a_1_16_5_server_gets_java_8_from_the_app_and_keeps_it() {
         .unwrap();
     assert!(!managed::downloads_allowed(&state).await);
 
-    let with_system_only = java::select_for(&state, None, required).await.unwrap();
+    let with_system_only = java::select_for(&state, None, required, fit).await.unwrap();
     match &with_system_only {
         None => println!("system-only: nothing suitable, so the app refuses"),
         Some(selection) => println!("system-only: fell back to {}", selection.path.display()),
@@ -236,6 +240,49 @@ async fn a_1_16_5_server_gets_java_8_from_the_app_and_keeps_it() {
     }
 
     // Back off again, so the last step can clean up.
+    db::setting_set(&state.db, managed::SYSTEM_ONLY_SETTING, "false")
+        .await
+        .unwrap();
+
+    // 8b. The same version under a mod loader. This is the case the rule
+    //     exists for: a system Java 17 satisfies a vanilla 1.16.5 server and
+    //     must not be handed to a Forge one.
+    let loader_fit = java::fit_for(ServerType::Forge);
+    assert_eq!(loader_fit, JavaFit::Exact);
+
+    let with_managed = java::select_for(&state, None, required, loader_fit)
+        .await
+        .unwrap()
+        .expect("the managed Java 8 fits a loader exactly");
+    println!(
+        "loader with a managed Java 8: {:?} {}",
+        with_managed.origin,
+        with_managed.path.display()
+    );
+    assert_eq!(with_managed.origin, Origin::Managed);
+
+    // With downloads off, the loader is left with the system list — where the
+    // only Java 8s are 32-bit and everything else is too new to substitute.
+    db::setting_set(&state.db, managed::SYSTEM_ONLY_SETTING, "true")
+        .await
+        .unwrap();
+    let loader_system_only = java::select_for(&state, None, required, loader_fit)
+        .await
+        .unwrap();
+    match &loader_system_only {
+        None => println!("loader, system-only: nothing fits, so the app offers Java 8"),
+        Some(selection) => println!(
+            "loader, system-only: {} (Java {:?})",
+            selection.path.display(),
+            selection.major
+        ),
+    }
+    if usable_8s.is_empty() {
+        assert!(
+            loader_system_only.is_none(),
+            "a loader must not be given a newer Java in place of the one it wants"
+        );
+    }
     db::setting_set(&state.db, managed::SYSTEM_ONLY_SETTING, "false")
         .await
         .unwrap();
@@ -305,10 +352,15 @@ async fn a_1_16_5_server_boots_on_the_managed_java_8() {
 
     let row = instance::get(&state.db, row.id).await.unwrap();
     let required = java::required_for(row.java_major, MC_VERSION);
-    let chosen = java::select_for(&state, row.java_path.as_deref(), required)
-        .await
-        .unwrap()
-        .expect("a runtime");
+    let chosen = java::select_for(
+        &state,
+        row.java_path.as_deref(),
+        required,
+        java::fit_for(row.server_type),
+    )
+    .await
+    .unwrap()
+    .expect("a runtime");
     assert_eq!(chosen.origin, Origin::Managed);
 
     // The EULA, written by the test rather than by the app: nothing in the

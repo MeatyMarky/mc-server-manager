@@ -228,7 +228,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
 
           {/* Which Java this version needs, and the download that provides it —
               asked here rather than at the first failed start. */}
-          <JavaPlanNotice mcVersion={mcVersion} />
+          <JavaPlanNotice mcVersion={mcVersion} serverType={serverType} />
 
           <div className="grid gap-2">
             <Label htmlFor="instance-ram">Maximum RAM (MB)</Label>

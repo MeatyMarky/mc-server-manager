@@ -160,7 +160,7 @@ export function ImportInstanceDialog({ open: isOpen, onOpenChange }: Props) {
 
             {/* An imported server needs the same Java as one created here, and
                 the same offer if it is missing. */}
-            <JavaPlanNotice mcVersion={mcVersion} />
+            <JavaPlanNotice mcVersion={mcVersion} serverType={serverType} />
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setCandidate(null)}>

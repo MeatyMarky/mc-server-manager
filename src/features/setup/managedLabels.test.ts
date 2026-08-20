@@ -24,6 +24,10 @@ function runtime(overrides: Partial<ManagedRuntime> = {}): ManagedRuntime {
 function plan(overrides: Partial<JavaPlan> = {}): JavaPlan {
   return {
     requiredMajor: 25,
+    fit: "floor",
+    reason: "26.2 Vanilla needs Java 25 or newer, and nothing suitable is installed.",
+    warning: null,
+    installedMajor: null,
     satisfied: false,
     origin: null,
     javaPath: null,

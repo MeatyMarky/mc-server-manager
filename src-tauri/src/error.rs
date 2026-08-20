@@ -106,6 +106,16 @@ pub enum AppError {
         mc_version: String,
     },
 
+    /// The mod loaders want the major version their Minecraft release was built
+    /// against, and a newer one is a different failure from an older one.
+    #[error("{server_type} {mc_version} is tested on Java {required}; Java {found} is installed")]
+    JavaWrongMajor {
+        required: i64,
+        found: i64,
+        mc_version: String,
+        server_type: String,
+    },
+
     #[error("the Java pinned for \"{instance}\" is missing: {path}")]
     JavaPinnedMissing { instance: String, path: String },
 
@@ -176,6 +186,7 @@ impl AppError {
             AppError::Offline { .. } => "offline",
             AppError::RateLimited { .. } => "rate_limited",
             AppError::JavaTooOld { .. } => "java_too_old",
+            AppError::JavaWrongMajor { .. } => "java_wrong_major",
             AppError::JavaPinnedMissing { .. } => "java_pinned_missing",
             AppError::Java32Bit { .. } => "java_32bit",
             AppError::EulaNotAccepted(_) => "eula_not_accepted",
@@ -276,6 +287,16 @@ impl AppError {
             } => format!(
                 "Minecraft {mc_version} needs Java {required}, but the newest Java on this computer is Java {found}."
             ),
+            AppError::JavaWrongMajor {
+                required,
+                found,
+                mc_version,
+                server_type,
+            } => format!(
+                "{server_type} {mc_version} is tested on Java {required}, and this computer has \
+                 Java {found}. Mod loaders rewrite code as they load it, so a different Java \
+                 usually breaks inside a mod rather than saying what is wrong."
+            ),
             AppError::JavaPinnedMissing { instance, path } => format!(
                 "The Java chosen for \"{instance}\" is no longer at {path}."
             ),
@@ -363,6 +384,13 @@ impl AppError {
                 return Some(format!(
                     "Install Java {required} or newer, then use Rescan in Settings. Older Java \
                      stays installed; this app picks per server."
+                ))
+            }
+            AppError::JavaWrongMajor { required, .. } => {
+                return Some(format!(
+                    "Let the app download Java {required} for this server, or pin a Java {required} \
+                     you already have. Pinning a different one is allowed, and this app will say \
+                     so rather than stop you."
                 ))
             }
             AppError::JavaPinnedMissing { .. } => {

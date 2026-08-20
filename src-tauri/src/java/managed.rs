@@ -143,7 +143,11 @@ pub fn is_managed_path(data_dir: &Path, java_path: &Path) -> bool {
 ///
 /// The setting is read here rather than at each call site, so selection,
 /// preflight and the create dialog's plan cannot disagree about it.
-pub async fn for_version(state: &AppState, required: i64) -> AppResult<Option<ManagedRuntime>> {
+pub async fn for_version(
+    state: &AppState,
+    required: i64,
+    fit: super::JavaFit,
+) -> AppResult<Option<ManagedRuntime>> {
     if system_java_only(state).await {
         return Ok(None);
     }
@@ -151,7 +155,7 @@ pub async fn for_version(state: &AppState, required: i64) -> AppResult<Option<Ma
     Ok(list(state)
         .await?
         .into_iter()
-        .filter(|runtime| super::satisfies(runtime.feature_version, required))
+        .filter(|runtime| fit.accepts(runtime.feature_version, required))
         .find(|runtime| Path::new(&runtime.java_path).is_file()))
 }
 
@@ -543,7 +547,7 @@ mod tests {
         // The row survives so the UI can show it, but nothing will be launched
         // with a binary that is not there.
         assert_eq!(list(&state).await.unwrap().len(), 1);
-        assert!(for_version(&state, 25).await.unwrap().is_none());
+        assert!(for_version(&state, 25, crate::java::JavaFit::Floor).await.unwrap().is_none());
     }
 
     #[tokio::test]

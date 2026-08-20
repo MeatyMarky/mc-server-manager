@@ -137,9 +137,94 @@ pub fn satisfies(installed_major: i64, required: i64) -> bool {
     installed_major >= required
 }
 
+/// How strictly a server type wants the Java version its Minecraft release
+/// was built against.
+///
+/// Vanilla and the Bukkit-family servers are happy on anything newer: they are
+/// plain Java programs, and a 1.16 server on Java 17 behaves. The mod loaders
+/// are not, because Mixin rewrites bytecode at load time and a class file
+/// format it does not know about produces failures deep inside somebody else's
+/// mod — the kind nobody can diagnose from the stack trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../src/lib/bindings/")]
+pub enum JavaFit {
+    /// At or above the requirement; the lowest suitable one is chosen.
+    Floor,
+    /// The major version this Minecraft release specifies, and no other.
+    Exact,
+}
+
+impl JavaFit {
+    /// Whether an installed major version fits under this rule.
+    pub fn accepts(self, installed_major: i64, required: i64) -> bool {
+        match self {
+            JavaFit::Floor => satisfies(installed_major, required),
+            JavaFit::Exact => installed_major == required,
+        }
+    }
+}
+
+/// The rule for a server type.
+pub fn fit_for(server_type: crate::db::models::ServerType) -> JavaFit {
+    use crate::db::models::ServerType;
+    match server_type {
+        ServerType::Vanilla | ServerType::Paper | ServerType::Purpur => JavaFit::Floor,
+        ServerType::Fabric | ServerType::Forge | ServerType::NeoForge => JavaFit::Exact,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::models::ServerType;
+
+    #[test]
+    fn plain_servers_take_anything_newer_and_loaders_do_not() {
+        assert_eq!(fit_for(ServerType::Vanilla), JavaFit::Floor);
+        assert_eq!(fit_for(ServerType::Paper), JavaFit::Floor);
+        assert_eq!(fit_for(ServerType::Purpur), JavaFit::Floor);
+
+        // Mixin rewrites bytecode as it loads, and a class file format it does
+        // not know about fails somewhere inside a mod rather than saying so.
+        assert_eq!(fit_for(ServerType::Fabric), JavaFit::Exact);
+        assert_eq!(fit_for(ServerType::Forge), JavaFit::Exact);
+        assert_eq!(fit_for(ServerType::NeoForge), JavaFit::Exact);
+    }
+
+    #[test]
+    fn a_floor_accepts_the_requirement_and_everything_above_it() {
+        assert!(JavaFit::Floor.accepts(8, 8));
+        assert!(JavaFit::Floor.accepts(17, 8));
+        assert!(JavaFit::Floor.accepts(25, 8));
+        assert!(!JavaFit::Floor.accepts(8, 17), "older is never enough");
+    }
+
+    #[test]
+    fn an_exact_rule_accepts_only_that_major() {
+        // The case this exists for: a 1.16.5 Forge server and a Java 17.
+        assert!(JavaFit::Exact.accepts(8, 8));
+        assert!(!JavaFit::Exact.accepts(17, 8));
+        assert!(!JavaFit::Exact.accepts(21, 8));
+        assert!(!JavaFit::Exact.accepts(8, 17));
+    }
+
+    /// The two rules disagree in exactly one direction: newer than required.
+    /// Anything a loader accepts, a plain server accepts too.
+    #[test]
+    fn exact_is_never_looser_than_floor() {
+        for required in [8, 17, 21, 25] {
+            for installed in [8, 11, 17, 21, 25, 26] {
+                if JavaFit::Exact.accepts(installed, required) {
+                    assert!(
+                        JavaFit::Floor.accepts(installed, required),
+                        "Java {installed} against a requirement of {required}"
+                    );
+                }
+            }
+        }
+    }
+
 
     const TEMURIN_21: &str = r#"openjdk version "21.0.10" 2026-01-20 LTS
 OpenJDK Runtime Environment Temurin-21.0.10+7 (build 21.0.10+7-LTS)

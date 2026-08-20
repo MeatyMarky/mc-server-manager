@@ -341,6 +341,10 @@ export const ipc = {
    * can. Asked when creating or importing, so the download is offered there
    * rather than at the first failed start.
    */
-  javaPlanFor: (mcVersion: string, recordedMajor?: number | null, pinned?: string | null) =>
-    invoke<JavaPlan>("java_plan_for", { mcVersion, recordedMajor, pinned }),
+  javaPlanFor: (
+    mcVersion: string,
+    serverType: ServerType,
+    recordedMajor?: number | null,
+    pinned?: string | null,
+  ) => invoke<JavaPlan>("java_plan_for", { mcVersion, serverType, recordedMajor, pinned }),
 };
