@@ -24,4 +24,9 @@ active: boolean,
 /**
  * Set when level.dat could not be read; the world is still listed.
  */
-problem: string | null, };
+problem: string | null, 
+/**
+ * Where players appear, from `SpawnX`/`SpawnY`/`SpawnZ`. A map centred on
+ * 0,0 is centred on nothing in particular; this is where the world is.
+ */
+spawnX: number | null, spawnY: number | null, spawnZ: number | null, };

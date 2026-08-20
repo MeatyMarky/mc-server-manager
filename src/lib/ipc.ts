@@ -165,6 +165,7 @@ export const ipc = {
   mapInstall: (id: number, kind: MapKind) => invoke<string>("map_install", { id, kind }),
   mapUninstall: (id: number) => invoke<void>("map_uninstall", { id }),
   mapAcceptDownload: (id: number) => invoke<boolean>("map_accept_download", { id }),
+  mapRenderWorld: (id: number) => invoke<string>("map_render_world", { id }),
 
   networkView: (id: number) => invoke<NetworkView>("network_view", { id }),
   networkPublicIp: (id: number) => invoke<PublicAddress | null>("network_public_ip", { id }),

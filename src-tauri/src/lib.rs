@@ -201,6 +201,7 @@ pub fn run() {
             commands::map::map_kinds_for,
             commands::map::map_install,
             commands::map::map_accept_download,
+            commands::map::map_render_world,
             commands::map::map_uninstall,
             commands::net::network_view,
             commands::net::network_public_ip,

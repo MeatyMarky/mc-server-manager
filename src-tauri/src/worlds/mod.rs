@@ -51,6 +51,14 @@ pub struct World {
     pub active: bool,
     /// Set when level.dat could not be read; the world is still listed.
     pub problem: Option<String>,
+    /// Where players appear, from `SpawnX`/`SpawnY`/`SpawnZ`. A map centred on
+    /// 0,0 is centred on nothing in particular; this is where the world is.
+    #[ts(type = "number | null")]
+    pub spawn_x: Option<i64>,
+    #[ts(type = "number | null")]
+    pub spawn_y: Option<i64>,
+    #[ts(type = "number | null")]
+    pub spawn_z: Option<i64>,
 }
 
 /// Reads what `level.dat` says about a world. A world with an unreadable
@@ -66,6 +74,9 @@ pub fn read_world(dir: &Path, active_name: &str) -> World {
         path: dir.to_string_lossy().to_string(),
         folder,
         display_name: None,
+        spawn_x: None,
+        spawn_y: None,
+        spawn_z: None,
         seed: None,
         game_type: None,
         hardcore: false,
@@ -105,6 +116,9 @@ pub fn read_world(dir: &Path, active_name: &str) -> World {
             world.last_played = root
                 .get_path(&["Data", "LastPlayed"])
                 .and_then(nbt::Value::as_i64);
+            world.spawn_x = root.get_path(&["Data", "SpawnX"]).and_then(nbt::Value::as_i64);
+            world.spawn_y = root.get_path(&["Data", "SpawnY"]).and_then(nbt::Value::as_i64);
+            world.spawn_z = root.get_path(&["Data", "SpawnZ"]).and_then(nbt::Value::as_i64);
             world.version = root
                 .get_path(&["Data", "Version", "Name"])
                 .and_then(nbt::Value::as_string)

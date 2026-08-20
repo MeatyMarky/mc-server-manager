@@ -1,6 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ExternalLink, Loader2, Map as MapIcon, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  Info,
+  Loader2,
+  Map as MapIcon,
+  RefreshCw,
+} from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/misc";
@@ -22,6 +30,7 @@ export function MapTab({ instance }: { instance: InstanceView }) {
   // Reloading an iframe means changing its key: the page inside is not ours.
   const [reloads, setReloads] = useState(0);
   const [allowing, setAllowing] = useState(false);
+  const [rendering, setRendering] = useState(false);
 
   const status = useQuery({
     queryKey: ["map", instance.id, instance.status],
@@ -38,13 +47,14 @@ export function MapTab({ instance }: { instance: InstanceView }) {
   }
 
   const map = status.data;
+  const mapName = map.kind === "blue_map" ? "BlueMap" : "Dynmap";
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge>
           <MapIcon className="mr-1 inline size-3.5" aria-hidden />
-          {map.kind === "blue_map" ? "BlueMap" : "Dynmap"}
+          {mapName}
         </Badge>
         {map.port ? (
           <>
@@ -109,6 +119,49 @@ export function MapTab({ instance }: { instance: InstanceView }) {
         </div>
       ) : null}
 
+      {map.barelyRendered && map.port ? (
+        // A map with nothing rendered is a black rectangle, which reads as
+        // broken rather than as empty. Both maps draw chunks as they are
+        // played, so a new world is *supposed* to look like this.
+        <div className="rounded-md border border-border px-3 py-2 text-xs">
+          <p className="flex items-start gap-2">
+            <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <span>
+              {mapName} renders areas as they are explored and saved. A new world will look
+              mostly empty until you have played in it.
+            </span>
+          </p>
+          {map.renderCommand ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!map.running || rendering}
+                onClick={() => {
+                  setRendering(true);
+                  ipc
+                    .mapRenderWorld(instance.id)
+                    .then((command) =>
+                      toast.success("Rendering started", {
+                        description: `Sent ${command}. Watch the Console tab for progress.`,
+                      }),
+                    )
+                    .catch((error: unknown) => toastError(error))
+                    .finally(() => setRendering(false));
+                }}
+              >
+                {rendering ? "Sending…" : "Render existing world now"}
+              </Button>
+              <span className="text-muted-foreground">
+                {map.running
+                  ? `Sends ${map.renderCommand}, which draws what has already been played.`
+                  : "The server has to be running to render."}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {map.conflict ? (
         <p className="flex items-start gap-2 rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
           <AlertTriangle
@@ -125,9 +178,7 @@ export function MapTab({ instance }: { instance: InstanceView }) {
       {!map.port ? (
         <Placeholder
           title="No map address yet"
-          detail={`${
-            map.kind === "blue_map" ? "BlueMap" : "Dynmap"
-          } writes its configuration the first time the server starts. Start the server once, then come back.`}
+          detail={`${mapName} writes its configuration the first time the server starts. Start the server once, then come back.`}
         />
       ) : !map.running ? (
         <Placeholder

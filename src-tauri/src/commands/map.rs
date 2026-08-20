@@ -96,6 +96,34 @@ pub async fn map_accept_download(state: State<'_, AppState>, id: i64) -> AppResu
     crate::map::config::accept_download(&row).await
 }
 
+/// Renders the parts of the world that were played before the map existed.
+///
+/// Both maps draw chunks as they are loaded and saved, so a world with history
+/// behind it stays blank until it is asked. The command goes through the same
+/// console path a typed one does, so it is echoed and its output is visible.
+#[tauri::command]
+pub async fn map_render_world(state: State<'_, AppState>, id: i64) -> AppResult<String> {
+    let row = instance::get(&state.db, id).await?;
+    let status = map::status(&state, id).await?;
+
+    let Some(command) = status.render_command else {
+        return Err(AppError::Other(format!(
+            "\"{}\" has no web map installed.",
+            row.name
+        )));
+    };
+
+    if !state.status_of(&row.uuid).is_live() {
+        return Err(AppError::Other(format!(
+            "\"{}\" has to be running for its map to render.",
+            row.name
+        )));
+    }
+
+    crate::process::supervisor::send_command(&state, id, &command).await?;
+    Ok(command)
+}
+
 /// Removes the map mod again, and forgets the intent to have one.
 #[tauri::command]
 pub async fn map_uninstall(state: State<'_, AppState>, id: i64) -> AppResult<()> {

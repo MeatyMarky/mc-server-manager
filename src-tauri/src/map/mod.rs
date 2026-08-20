@@ -17,6 +17,8 @@ use ts_rs::TS;
 
 use tokio_util::sync::CancellationToken;
 
+use std::path::{Path, PathBuf};
+
 use crate::db::models::{Instance, ServerType};
 use crate::error::{AppError, AppResult};
 use crate::mods::source::{ModSource, SourceId, VersionFilter};
@@ -62,6 +64,18 @@ impl MapKind {
         match self {
             MapKind::BlueMap => 8100,
             MapKind::Dynmap => 8123,
+        }
+    }
+
+    /// The console command that renders a world that has already been played.
+    ///
+    /// Both maps render as chunks are loaded and saved, so a world played
+    /// before the map existed stays blank until it is asked. Sent from the
+    /// console, so no leading slash.
+    pub fn render_command(self, world: &str) -> String {
+        match self {
+            MapKind::BlueMap => format!("bluemap update {world}"),
+            MapKind::Dynmap => format!("dynmap fullrender {world}"),
         }
     }
 
@@ -178,6 +192,14 @@ pub struct MapStatus {
     /// True when BlueMap's config says it may not download its resources, which
     /// is the state it stops in with "BlueMap is missing important resources!".
     pub download_blocked: bool,
+    /// True when almost nothing has been rendered yet. A new map is a black
+    /// rectangle, which reads as broken rather than as empty.
+    pub barely_rendered: bool,
+    /// The world the server loads, for the render command and the hint.
+    pub world: Option<String>,
+    /// The console command that renders what has already been played, when the
+    /// map has one. Built here so the page never assembles a command.
+    pub render_command: Option<String>,
 }
 
 /// Everything the Map tab needs, read fresh from disk.
@@ -196,21 +218,140 @@ pub async fn status(state: &AppState, id: i64) -> AppResult<MapStatus> {
         None => None,
     };
 
+    // The world the server will load, which is both what the map is named
+    // after and what a render command has to name.
+    let world = {
+        let path = row.path_buf();
+        tokio::task::spawn_blocking(move || {
+            let properties =
+                std::fs::read_to_string(crate::paths::server_properties_path(&path)).ok();
+            properties
+                .as_deref()
+                .and_then(|text| crate::process::port::read_property(text, "level-name"))
+                .unwrap_or_else(|| "world".to_string())
+        })
+        .await
+        .unwrap_or_else(|_| "world".to_string())
+    };
+
+    // Where the world starts, from the level.dat the Worlds tab already reads.
+    let spawn = {
+        let world_dir = row.path_buf().join(&world);
+        let active = world.clone();
+        tokio::task::spawn_blocking(move || {
+            let found = crate::worlds::read_world(&world_dir, &active);
+            found
+                .spawn_x
+                .zip(found.spawn_z)
+                .map(|(x, z)| (x, found.spawn_y.unwrap_or(64), z))
+        })
+        .await
+        .unwrap_or(None)
+    };
+
+    let barely_rendered = match kind {
+        Some(kind) => {
+            let path = row.path_buf();
+            let server_type = row.server_type;
+            tokio::task::spawn_blocking(move || barely_rendered(&path, server_type, kind))
+                .await
+                .unwrap_or(false)
+        }
+        None => false,
+    };
+
     Ok(MapStatus {
         download_blocked: match kind {
             Some(MapKind::BlueMap) => config::download_blocked(&row).await?,
             _ => false,
         },
+        barely_rendered,
+        render_command: kind.map(|kind| kind.render_command(&world)),
+        world: Some(world.clone()),
         available: kinds_for(row.server_type),
         config_path: kind.map(|kind| config::config_path(&row, kind).to_string_lossy().to_string()),
         // Loopback rather than a name: this is the machine the server runs on,
         // and the Networking tab is where the shareable addresses live.
-        url: port.map(|port| format!("http://127.0.0.1:{port}")),
+        url: port
+            .zip(kind)
+            .map(|(port, kind)| view_url(kind, port, &world, spawn)),
         running: state.status_of(&row.uuid).is_live(),
         kind,
         port,
         conflict,
     })
+}
+
+/// The address to open, centred on the world's spawn.
+///
+/// A map opened at 0,0 is opened at nothing in particular — the world is
+/// wherever its spawn is, which may be thousands of blocks away. Each project
+/// takes the position differently: BlueMap in the URL fragment it also writes
+/// when you move around, Dynmap in query parameters.
+///
+/// Without a spawn (no level.dat yet, or an unreadable one) the plain address
+/// is returned rather than a guessed position.
+pub fn view_url(kind: MapKind, port: u16, world: &str, spawn: Option<(i64, i64, i64)>) -> String {
+    let base = format!("http://127.0.0.1:{port}");
+    let Some((x, y, z)) = spawn else {
+        return base;
+    };
+
+    match kind {
+        // #<map>:<x>:<y>:<z>:<distance>:<yaw>:<pitch>:<roll>:<perspective>
+        MapKind::BlueMap => format!("{base}/#{world}:{x}:{y}:{z}:500:0:0:0:perspective"),
+        MapKind::Dynmap => {
+            format!("{base}/?worldname={world}&mapname=surface&zoom=4&x={x}&y={y}&z={z}")
+        }
+    }
+}
+
+/// How full the map's tile folder has to be before it stops counting as new.
+///
+/// BlueMap writes one file per rendered tile, so a played-in world has hundreds.
+/// A dozen is generous for "nothing has been rendered yet" and cheap to count.
+const RENDERED_ENOUGH: usize = 12;
+
+/// Where each map keeps the tiles it has rendered.
+fn tile_dir(instance_path: &Path, server_type: ServerType, kind: MapKind) -> PathBuf {
+    match kind {
+        // BlueMap's default `data` folder, holding one folder per map.
+        MapKind::BlueMap => instance_path.join("bluemap").join("web").join("maps"),
+        MapKind::Dynmap => match server_type {
+            ServerType::Paper | ServerType::Purpur => instance_path
+                .join("plugins")
+                .join("dynmap")
+                .join("web")
+                .join("tiles"),
+            _ => instance_path.join("dynmap").join("web").join("tiles"),
+        },
+    }
+}
+
+/// Whether the map has rendered so little that it will look broken.
+///
+/// Counting stops at `RENDERED_ENOUGH`: the question is "is this empty", not
+/// "how big is it", and a rendered world holds tens of thousands of files.
+fn barely_rendered(instance_path: &Path, server_type: ServerType, kind: MapKind) -> bool {
+    let root = tile_dir(instance_path, server_type, kind);
+    if !root.is_dir() {
+        return true;
+    }
+
+    let mut found = 0usize;
+    for entry in walkdir::WalkDir::new(&root)
+        .max_depth(6)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_file() {
+            found += 1;
+            if found >= RENDERED_ENOUGH {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The name of another server that would fight this one for a port.
@@ -438,6 +579,83 @@ mod tests {
         ] {
             assert_eq!(default_for(server_type), Some(MapKind::BlueMap));
         }
+    }
+
+    #[test]
+    fn the_view_opens_where_the_world_is() {
+        // A map centred on 0,0 is centred on nothing in particular when the
+        // spawn is 3000 blocks away, which is what made a populated map look
+        // blank.
+        let bluemap = view_url(MapKind::BlueMap, 8100, "world", Some((3000, 71, -1200)));
+        assert!(bluemap.starts_with("http://127.0.0.1:8100/#world:3000:71:-1200:"), "{bluemap}");
+
+        let dynmap = view_url(MapKind::Dynmap, 8123, "world", Some((3000, 71, -1200)));
+        assert!(dynmap.contains("worldname=world"), "{dynmap}");
+        assert!(dynmap.contains("x=3000"), "{dynmap}");
+        assert!(dynmap.contains("z=-1200"), "{dynmap}");
+    }
+
+    #[test]
+    fn a_world_with_no_spawn_yet_gets_the_plain_address() {
+        // No level.dat before the first start, and a guessed position would be
+        // worse than the map's own default.
+        for kind in [MapKind::BlueMap, MapKind::Dynmap] {
+            assert_eq!(view_url(kind, 8100, "world", None), "http://127.0.0.1:8100");
+        }
+    }
+
+    #[test]
+    fn the_world_name_travels_into_the_view_and_the_render_command() {
+        // A renamed level-name is both the map's id and what a render has to
+        // name, so neither may be hardcoded to "world".
+        let url = view_url(MapKind::BlueMap, 8100, "survival", Some((0, 64, 0)));
+        assert!(url.contains("#survival:"), "{url}");
+        assert_eq!(
+            MapKind::BlueMap.render_command("survival"),
+            "bluemap update survival"
+        );
+        assert_eq!(
+            MapKind::Dynmap.render_command("survival"),
+            "dynmap fullrender survival"
+        );
+        // Console commands, so no leading slash.
+        assert!(!MapKind::BlueMap.render_command("survival").starts_with('/'));
+    }
+
+    #[test]
+    fn an_unrendered_map_is_recognised_and_a_rendered_one_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // Nothing at all: the state right after installing.
+        assert!(barely_rendered(root, ServerType::Fabric, MapKind::BlueMap));
+
+        let tiles = root.join("bluemap").join("web").join("maps").join("world").join("tiles");
+        std::fs::create_dir_all(&tiles).unwrap();
+        assert!(barely_rendered(root, ServerType::Fabric, MapKind::BlueMap), "empty folder");
+
+        // A handful of tiles is still a world nobody has played in.
+        for index in 0..(RENDERED_ENOUGH - 1) {
+            std::fs::write(tiles.join(format!("{index}.png")), b"tile").unwrap();
+        }
+        assert!(barely_rendered(root, ServerType::Fabric, MapKind::BlueMap), "a few tiles");
+
+        // Past the threshold it stops claiming the map is empty.
+        std::fs::write(tiles.join("enough.png"), b"tile").unwrap();
+        assert!(!barely_rendered(root, ServerType::Fabric, MapKind::BlueMap));
+    }
+
+    #[test]
+    fn dynmap_tiles_follow_the_servers_own_folder_convention() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let paper = tile_dir(root, ServerType::Paper, MapKind::Dynmap);
+        assert!(paper.to_string_lossy().replace('\\', "/").ends_with("plugins/dynmap/web/tiles"));
+
+        let forge = tile_dir(root, ServerType::Forge, MapKind::Dynmap);
+        assert!(forge.to_string_lossy().replace('\\', "/").ends_with("dynmap/web/tiles"));
+        assert!(!forge.to_string_lossy().contains("plugins"));
     }
 
     #[test]

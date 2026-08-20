@@ -39,4 +39,18 @@ conflict: string | null,
  * True when BlueMap's config says it may not download its resources, which
  * is the state it stops in with "BlueMap is missing important resources!".
  */
-downloadBlocked: boolean, };
+downloadBlocked: boolean, 
+/**
+ * True when almost nothing has been rendered yet. A new map is a black
+ * rectangle, which reads as broken rather than as empty.
+ */
+barelyRendered: boolean, 
+/**
+ * The world the server loads, for the render command and the hint.
+ */
+world: string | null, 
+/**
+ * The console command that renders what has already been played, when the
+ * map has one. Built here so the page never assembles a command.
+ */
+renderCommand: string | null, };

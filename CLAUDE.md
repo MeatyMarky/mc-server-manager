@@ -292,6 +292,22 @@ The Map tab embeds the local URL in a sandboxed iframe (`frame-src` allows loopb
 says which of the two "nothing to show" states applies: the server is stopped, or the config
 has not been written yet.
 
+### An empty map is not a broken one, and it says so
+Both maps draw chunks as they are played and saved, so a freshly installed one is a black
+rectangle — which reads as a failure. `map::barely_rendered` counts files under the tile
+folder, stopping at `RENDERED_ENOUGH` (12) because the question is "is this empty", not "how
+big is it", and the tab explains the emptiness rather than showing it bare. The way out is
+`render_command` (`bluemap update <world>` / `dynmap fullrender <world>`), sent through the
+ordinary console path so it is echoed and its progress is readable, and offered only while
+the server is running.
+
+The view opens on the world's spawn, read from the same `level.dat` the Worlds tab parses
+(`SpawnX`/`SpawnY`/`SpawnZ`). A map centred on 0,0 is centred on nothing in particular when
+the spawn is three thousand blocks away, which is its own way of looking broken. `view_url`
+builds the position for each project — BlueMap's URL fragment, Dynmap's query parameters —
+in Rust, and falls back to the plain address when there is no spawn to point at rather than
+guessing one. The world name comes from `level-name`, so a renamed world still finds its map.
+
 ### Stopping a mapped server is a sequence, and every line of it is echoed
 A map mod is a web server and a render thread pool inside the same JVM, so a stop gets
 `MAP_STOP_GRACE` (45 s) on top of the configured timeout, and `stop_sequence` sends
