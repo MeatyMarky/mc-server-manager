@@ -90,13 +90,23 @@ pub async fn list(pool: &SqlitePool) -> AppResult<Vec<JavaRuntime>> {
 /// Best runtime for a required major version: the lowest major that still
 /// satisfies the requirement, so a 1.16 server does not get Java 26.
 pub async fn best_for(pool: &SqlitePool, required: i64) -> AppResult<Option<JavaRuntime>> {
-    let mut runtimes = list(pool).await?;
+    Ok(best_of(list(pool).await?, required))
+}
+
+/// The same choice, over a list a caller has already narrowed.
+///
+/// Pure, and separate from `best_for`, because "system Java only" has to drop
+/// the managed runtimes *before* the pick rather than after it: the managed
+/// Java 8 is the lowest major that satisfies a 1.16 server, so rejecting the
+/// winner afterwards would answer "nothing suitable" while a perfectly good
+/// system Java 17 sat behind it in the list.
+pub fn best_of(mut runtimes: Vec<JavaRuntime>, required: i64) -> Option<JavaRuntime> {
     // 32-bit runtimes are excluded here rather than at launch: picking one
     // automatically produces "Invalid maximum heap size" from the JVM, which
     // tells the user nothing about which Java was used or why.
     runtimes.retain(|r| satisfies(r.major, required) && r.usable_for_servers());
     runtimes.sort_by_key(|r| r.major);
-    Ok(runtimes.into_iter().next())
+    runtimes.into_iter().next()
 }
 
 /// The feature version of the runtime at `path`, asked of the binary itself.
@@ -187,7 +197,18 @@ pub async fn select_for(
         }));
     }
 
-    Ok(best_for(&state.db, required).await?.map(|runtime| Selection {
+    // A managed runtime is in the detected list as well, so this is where the
+    // "system Java only" setting has to be applied a second time: without it
+    // the runtime this app downloaded comes back through the system route,
+    // labelled as though the machine had it all along.
+    let mut candidates = list(&state.db).await?;
+    if managed::system_java_only(state).await {
+        candidates.retain(|runtime| {
+            !managed::is_managed_path(&state.data_dir, std::path::Path::new(&runtime.path))
+        });
+    }
+
+    Ok(best_of(candidates, required).map(|runtime| Selection {
         path: std::path::PathBuf::from(runtime.path),
         origin: Origin::System,
         major: Some(runtime.major),
@@ -387,6 +408,58 @@ pub async fn add_manual(pool: &SqlitePool, path: &str) -> AppResult<JavaRuntime>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn runtime(major: i64, path: &str, bits: Option<i64>) -> JavaRuntime {
+        JavaRuntime {
+            id: major,
+            path: path.to_string(),
+            major,
+            full_version: None,
+            vendor: None,
+            arch: None,
+            bits,
+            source: JavaSource::Path,
+            valid: true,
+            detected_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn the_lowest_runtime_that_satisfies_the_floor_wins() {
+        let found = best_of(
+            vec![
+                runtime(26, "C:/jdk-26/bin/java.exe", Some(64)),
+                runtime(17, "C:/jdk-17/bin/java.exe", Some(64)),
+                runtime(21, "C:/jdk-21/bin/java.exe", Some(64)),
+            ],
+            8,
+        );
+        // A 1.16 server takes the oldest thing that can still run it.
+        assert_eq!(found.map(|runtime| runtime.major), Some(17));
+    }
+
+    #[test]
+    fn a_32_bit_runtime_is_never_the_answer_even_when_it_is_the_only_match() {
+        let found = best_of(vec![runtime(8, "C:/Program Files (x86)/java.exe", Some(32))], 8);
+        assert!(found.is_none(), "it cannot address the heap a server is given");
+
+        // And an unknown width is treated the same until the next scan proves it.
+        let unknown = best_of(vec![runtime(8, "C:/java.exe", None)], 8);
+        assert!(unknown.is_none());
+    }
+
+    #[test]
+    fn a_managed_runtime_is_recognised_by_where_it_lives() {
+        let data_dir = std::path::Path::new("C:/Users/x/AppData/Roaming/dev.msm.manager");
+        let managed = data_dir.join("runtimes/temurin-8/jdk8u502-b07/bin/java.exe");
+        assert!(managed::is_managed_path(data_dir, &managed));
+
+        // A system install is not, however similar the name looks.
+        assert!(!managed::is_managed_path(
+            data_dir,
+            std::path::Path::new("C:/Program Files/Eclipse Adoptium/jdk-8/bin/java.exe")
+        ));
+    }
 
     async fn seed(pool: &SqlitePool, path: &str, major: i64) {
         seed_bits(pool, path, major, Some(64)).await;

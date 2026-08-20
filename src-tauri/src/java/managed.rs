@@ -82,9 +82,14 @@ pub fn java_binary_within(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Whether this app may download runtimes at all.
-pub async fn downloads_allowed(state: &AppState) -> bool {
-    !matches!(
+/// Whether the user has asked for system Java only.
+///
+/// The setting says "use only the Java installed on this computer", and that is
+/// the whole of what it means: no downloads, and the runtimes this app already
+/// downloaded stop being an answer. A switch that quietly kept using them would
+/// be answering a different question from the one it asks.
+pub async fn system_java_only(state: &AppState) -> bool {
+    matches!(
         crate::db::setting_get(&state.db, SYSTEM_ONLY_SETTING)
             .await
             .ok()
@@ -92,6 +97,11 @@ pub async fn downloads_allowed(state: &AppState) -> bool {
             .as_deref(),
         Some("true")
     )
+}
+
+/// Whether this app may download runtimes at all.
+pub async fn downloads_allowed(state: &AppState) -> bool {
+    !system_java_only(state).await
 }
 
 /// Every runtime this app has downloaded, newest feature version first.
@@ -118,9 +128,26 @@ pub async fn list(state: &AppState) -> AppResult<Vec<ManagedRuntime>> {
     Ok(out)
 }
 
-/// The managed runtime for a feature version, if one is installed and its
-/// binary is still on disk.
+/// Whether a path is inside the folder this app downloads runtimes into.
+///
+/// A managed runtime is also registered in the detected list, so the pin
+/// dropdown can offer it — which means "system Java only" has to recognise it
+/// there too, or the setting is honoured in one code path and quietly ignored
+/// in the other.
+pub fn is_managed_path(data_dir: &Path, java_path: &Path) -> bool {
+    java_path.starts_with(runtimes_dir(data_dir))
+}
+
+/// The managed runtime for a feature version, if one is installed, its binary
+/// is still on disk, and the user has not asked for system Java only.
+///
+/// The setting is read here rather than at each call site, so selection,
+/// preflight and the create dialog's plan cannot disagree about it.
 pub async fn for_version(state: &AppState, required: i64) -> AppResult<Option<ManagedRuntime>> {
+    if system_java_only(state).await {
+        return Ok(None);
+    }
+
     Ok(list(state)
         .await?
         .into_iter()

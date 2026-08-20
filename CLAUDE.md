@@ -132,9 +132,21 @@ into place, so a folder under `runtimes/` never holds a half-extracted JDK.
 Selection order is the user's choices before the app's own: pin, then a managed runtime,
 then a system JDK (`java::select_for`). Nothing suitable is `None`, which is what the UI
 turns into an offer naming the version and the download size — asked while an instance is
-being created or imported, not at the first failed start. `use_system_java_only` switches
-downloading off entirely. A managed runtime is removed only when no instance depends on it,
-and the refusal names them.
+being created or imported, not at the first failed start. A managed runtime is removed only
+when no instance depends on it, and the refusal names them.
+
+`use_system_java_only` means what it says on the switch — "use only the Java installed on
+this computer" — so it stops downloads **and** stops the already-downloaded runtimes being
+chosen. That takes two exclusions, not one: `managed::for_version` returns `None`, and the
+system route drops paths under `<data>/runtimes/` as well, because `install` also registers
+the runtime in the detected list so the pin dropdown can offer it. The filtering happens
+before the pick (`java::best_of`), never after it: the managed Java 8 is the *lowest* major
+that satisfies a 1.16 server, and rejecting the winner afterwards reported "nothing
+suitable" while a usable system Java 17 sat behind it in the list.
+
+The requirement is a floor, so any usable JDK at or above it satisfies an instance and no
+offer is made. On a machine with a newer JDK, the offer is therefore only reachable for a
+version whose requirement *nothing* installed meets.
 
 ### The required Java version is a floor, and the chosen binary is asked directly
 `java::required_for(recorded, mc_version)` takes the higher of the number recorded at
