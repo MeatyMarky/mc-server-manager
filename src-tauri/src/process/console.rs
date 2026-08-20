@@ -60,7 +60,15 @@ impl ConsoleBuffer {
         self.in_missing_properties_trace = false;
     }
 
-    /// Parses and stores one line, returning the structured form to be emitted.
+    /// Whether this launch is the one that creates `server.properties`.
+    ///
+    /// Both facts in one place, so the decision can be tested and logged rather
+    /// than inferred afterwards from what the console ended up showing.
+    pub fn is_first_boot(last_started_at: Option<&str>, properties_exists: bool) -> bool {
+        last_started_at.is_none() && !properties_exists
+    }
+
+    /// Parses and stores one line, returning the structured form to be emitted.    /// Parses and stores one line, returning the structured form to be emitted.
     pub fn push(&mut self, raw: &str, stderr: bool) -> ParsedLine {
         let (timestamp, level, thread, message) = logparse::parse_line(raw, stderr);
         let (level, message) = self.soften_first_boot(raw, level, message);
@@ -109,7 +117,13 @@ impl ConsoleBuffer {
             if logparse::is_exception_continuation(raw) {
                 return (LogLevel::Debug, message);
             }
-            self.in_missing_properties_trace = false;
+            // Only the server's own next line closes the block. stdout and
+            // stderr are separate pipes feeding one channel, so a JVM warning
+            // can arrive in the middle of the trace; ending the block on it
+            // would leave the remaining frames red.
+            if logparse::starts_a_log_line(raw) {
+                self.in_missing_properties_trace = false;
+            }
         }
 
         (level, message)
@@ -393,6 +407,51 @@ mod tests {
         buffer.expect_missing_properties(false);
         let line = buffer.push("\tat net.minecraft.server.Main.main(Main.java:113)", true);
         assert_eq!(line.level, LogLevel::Error, "stderr, and no block is open");
+    }
+
+    #[test]
+    fn the_arming_decision_is_both_facts_and_nothing_else() {
+        // Fresh row, no file: the boot that writes it.
+        assert!(ConsoleBuffer::is_first_boot(None, false));
+        // Fresh row but the file is already there — an import, or a folder
+        // somebody copied in. Not the case this exists for.
+        assert!(!ConsoleBuffer::is_first_boot(None, true));
+        // Started before, file gone: a real problem, shown in full.
+        assert!(!ConsoleBuffer::is_first_boot(Some("2026-08-20T16:47:44Z"), false));
+        assert!(!ConsoleBuffer::is_first_boot(Some("2026-08-20T16:47:44Z"), true));
+    }
+
+    #[test]
+    fn a_jvm_warning_inside_the_trace_does_not_end_it() {
+        // stdout and stderr are separate pipes feeding one channel, and
+        // Minecraft 26 prints eight sun.misc.Unsafe warnings on every start —
+        // one landing mid-trace used to leave the rest of the frames red.
+        let mut buffer = ConsoleBuffer::new();
+        buffer.expect_missing_properties(true);
+
+        buffer.push(
+            "[18:47:53] [main/ERROR]: Failed to load properties from file: server.properties",
+            false,
+        );
+        buffer.push("java.nio.file.NoSuchFileException: server.properties", false);
+        let interloper = buffer.push(
+            "WARNING: sun.misc.Unsafe::objectFieldOffset has been called by org.joml.MemUtil",
+            true,
+        );
+        let frame = buffer.push(
+            "\tat java.base/sun.nio.fs.WindowsException.translateToIOException(WindowsException.java:85)",
+            false,
+        );
+
+        // The warning keeps its own level, and the frames after it stay quiet.
+        assert_eq!(interloper.level, LogLevel::Warn);
+        assert_eq!(frame.level, LogLevel::Debug);
+
+        // The server's own next line closes the block.
+        let after = buffer.push("[18:47:53] [main/INFO]: Loaded 1 recipes", false);
+        assert_eq!(after.level, LogLevel::Info);
+        let later = buffer.push("[18:47:54] [main/ERROR]: something is genuinely wrong", false);
+        assert_eq!(later.level, LogLevel::Error);
     }
 
     #[test]

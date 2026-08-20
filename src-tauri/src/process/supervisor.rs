@@ -393,15 +393,33 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
     // Refuse a command line the JVM would only reject after it starts.
     launch::validate_args(&plan.args)?;
 
-    // A first boot writes its own server.properties, and complains loudly on
-    // the way there. Decided before the process exists, from the row as it
-    // stands now — `last_started_at` is set a few lines below.
-    let first_boot_without_properties = instance.last_started_at.is_none()
-        && !crate::paths::server_properties_path(&instance.path_buf()).exists();
+    // A first boot writes its own server.properties, and complains loudly at
+    // ERROR on the way there. Decided from the row as it stands now, because
+    // `last_started_at` is set a few lines below, and from the folder as it is
+    // before the process exists.
+    let properties_path = crate::paths::server_properties_path(&instance.path_buf());
+    let properties_exists = properties_path.exists();
+    let first_boot = ConsoleBuffer::is_first_boot(
+        instance.last_started_at.as_deref(),
+        properties_exists,
+    );
+
+    // Both facts and the decision, every launch. Working out afterwards why a
+    // first boot still showed a red stack trace took a database, a folder
+    // listing and three file timestamps; it should take one line.
+    tracing::info!(
+        instance = %instance.name,
+        last_started_at = instance.last_started_at.as_deref().unwrap_or("never"),
+        properties_path = %properties_path.display(),
+        properties_exists,
+        first_boot,
+        "first-boot properties grace {}",
+        if first_boot { "armed" } else { "not armed" }
+    );
 
     let console = state.supervisor.console(&instance.uuid);
     if let Ok(mut buffer) = console.lock() {
-        buffer.expect_missing_properties(first_boot_without_properties);
+        buffer.expect_missing_properties(first_boot);
         buffer.push_system(&format!("Command: {command_line}"));
     }
 

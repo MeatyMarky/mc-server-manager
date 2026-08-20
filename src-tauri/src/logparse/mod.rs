@@ -335,6 +335,16 @@ pub fn is_missing_properties_header(message: &str) -> bool {
     lower.contains("failed to load properties from file") && lower.contains("server.properties")
 }
 
+/// Whether a line is the start of a fresh log line from the server.
+///
+/// Either a bracketed timestamp (vanilla, Paper, Forge, Fabric) or the log4j
+/// plain layout. Used to decide where a stack trace ends, because everything
+/// in between belongs to the exception.
+pub fn starts_a_log_line(line: &str) -> bool {
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    trimmed.starts_with('[') || parse_log4j(trimmed).is_some()
+}
+
 /// Whether a line is the continuation of the exception above it.
 ///
 /// Java prints the exception class first, then frames indented with a tab or
