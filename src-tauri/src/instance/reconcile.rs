@@ -97,7 +97,12 @@ pub async fn reconcile_all(state: &AppState) -> AppResult<usize> {
             Reconciliation::StillRunning => {
                 state.set_status(&uuid, InstanceStatus::Unmanaged);
                 adopted += 1;
-                tracing::info!(instance = %name, pid = ?pid, "adopted an orphaned server process");
+                tracing::info!(
+                    instance = %name,
+                    instance_id = id,
+                    pid = ?pid,
+                    "adopted an orphaned server process"
+                );
                 record_event(
                     &state.db,
                     id,
@@ -109,7 +114,12 @@ pub async fn reconcile_all(state: &AppState) -> AppResult<usize> {
             Reconciliation::Gone => {
                 state.set_status(&uuid, InstanceStatus::Crashed);
                 clear_pid(&state.db, id, Some("crashed")).await?;
-                tracing::warn!(instance = %name, pid = ?pid, "server process is gone; marking crashed");
+                tracing::warn!(
+                    instance = %name,
+                    instance_id = id,
+                    pid = ?pid,
+                    "server process is gone; marking crashed"
+                );
                 record_event(
                     &state.db,
                     id,

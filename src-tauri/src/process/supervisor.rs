@@ -342,6 +342,7 @@ async fn report_choice(
     let major = java::probe_major(java).await;
     tracing::info!(
         instance = %instance.name,
+        instance_id = instance.id,
         java = %java.display(),
         java_major = major.map(|m| m.to_string()).unwrap_or_else(|| "unknown".into()),
         bits = bits.map(|b| b.to_string()).unwrap_or_else(|| "unknown".into()),
@@ -385,6 +386,7 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
     let command_line = launch::quoted_command(&plan.program, &plan.args);
     tracing::info!(
         instance = %instance.name,
+        instance_id = instance.id,
         argv = %command_line,
         working_dir = %plan.working_dir.display(),
         "spawning server process"
@@ -409,6 +411,7 @@ pub async fn start(app: &AppHandle, state: &AppState, id: i64) -> AppResult<()> 
     // listing and three file timestamps; it should take one line.
     tracing::info!(
         instance = %instance.name,
+        instance_id = instance.id,
         last_started_at = instance.last_started_at.as_deref().unwrap_or("never"),
         properties_path = %properties_path.display(),
         properties_exists,
@@ -619,7 +622,12 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
             // If the app died between save-off and save-on, this is the first
             // moment a console exists to put it right.
             crate::backup::saveguard::recover_on_start(&state, instance.id).await;
-            tracing::info!(instance = %instance.name, took = ?took, "server is ready");
+            tracing::info!(
+                instance = %instance.name,
+                instance_id = instance.id,
+                took = ?took,
+                "server is ready"
+            );
         }
         LogEvent::Stopping => {
             state.set_status(&instance.uuid, InstanceStatus::Stopping);
@@ -654,6 +662,7 @@ async fn handle_log_event(app: &AppHandle, instance: &Instance, event: LogEvent)
             );
             tracing::warn!(
                 instance = %instance.name,
+                instance_id = instance.id,
                 needs,
                 found,
                 class = class_name.as_deref().unwrap_or("-"),
@@ -811,7 +820,12 @@ fn spawn_monitor(
                 tokio::time::sleep(delay).await;
                 let state = app.state::<AppState>();
                 if let Err(err) = start(&app, &state, instance.id).await {
-                    tracing::warn!(error = %err, instance = %instance.name, "auto-restart failed");
+                    tracing::warn!(
+                        error = %err,
+                        instance = %instance.name,
+                        instance_id = instance.id,
+                        "auto-restart failed"
+                    );
                     let _ =
                         record_event(&state.db, instance.id, "error", Some(&err.to_string())).await;
                 }
@@ -824,7 +838,11 @@ fn spawn_monitor(
                     "Gave up restarting after {attempts} crashes in {}s",
                     window_secs
                 );
-                tracing::warn!(instance = %instance.name, "{message}");
+                tracing::warn!(
+                    instance = %instance.name,
+                    instance_id = instance.id,
+                    "{message}"
+                );
                 if let Ok(mut buffer) = state.supervisor.console(&instance.uuid).lock() {
                     buffer.push_system(&message);
                 }
@@ -838,7 +856,11 @@ fn spawn_monitor(
                     Some(line) => format!("The server did not finish starting: {line}"),
                     None => "The server did not finish starting.".to_string(),
                 };
-                tracing::warn!(instance = %instance.name, "{message}");
+                tracing::warn!(
+                    instance = %instance.name,
+                    instance_id = instance.id,
+                    "{message}"
+                );
                 let _ = record_event(&state.db, instance.id, "error", Some(&message)).await;
             }
             backoff::RestartDecision::Disabled | backoff::RestartDecision::CleanExit => {}
@@ -953,13 +975,21 @@ pub async fn stop(app: &AppHandle, state: &AppState, id: i64) -> AppResult<StopS
         return finish_stop(app, state, &instance, StopStage::Graceful).await;
     }
 
-    tracing::warn!(instance = %instance.name, "stop command ignored; terminating");
+    tracing::warn!(
+        instance = %instance.name,
+        instance_id = instance.id,
+        "stop command ignored; terminating"
+    );
     super::signal::request_terminate(pid);
     if wait_for_exit(&exited, TERMINATE_GRACE).await {
         return finish_stop(app, state, &instance, StopStage::Terminated).await;
     }
 
-    tracing::warn!(instance = %instance.name, "terminate ignored; killing");
+    tracing::warn!(
+        instance = %instance.name,
+        instance_id = instance.id,
+        "terminate ignored; killing"
+    );
     super::signal::force_kill(pid);
     wait_for_exit(&exited, TERMINATE_GRACE).await;
     finish_stop(app, state, &instance, StopStage::Killed).await

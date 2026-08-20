@@ -94,7 +94,7 @@ pub async fn resume(state: &AppState, id: i64) {
     if let Err(err) = supervisor::send_command(state, id, "save-on").await {
         tracing::error!(
             error = %err,
-            instance = id,
+            instance_id = id,
             "could not re-enable world saving; the marker is kept so the next start fixes it"
         );
         let _ = record_event(
@@ -118,7 +118,7 @@ pub async fn recover_on_start(state: &AppState, id: i64) {
     match is_marked(state, id).await {
         Ok(true) => {
             tracing::warn!(
-                instance = id,
+                instance_id = id,
                 "an interrupted backup left world saving disabled; re-enabling it"
             );
             let _ = record_event(
@@ -159,6 +159,7 @@ pub async fn reconcile_on_launch(state: &AppState) -> AppResult<usize> {
             still_disabled += 1;
             tracing::warn!(
                 instance = %name,
+                instance_id = id,
                 since = %since,
                 "a backup was interrupted while world saving was off, and the server is still                  running outside this app; start it from here to re-enable saving"
             );
@@ -174,6 +175,7 @@ pub async fn reconcile_on_launch(state: &AppState) -> AppResult<usize> {
         } else {
             tracing::info!(
                 instance = %name,
+                instance_id = id,
                 since = %since,
                 "clearing a saving-disabled marker left by an interrupted backup: the server is                  no longer running, so saving is on again"
             );
