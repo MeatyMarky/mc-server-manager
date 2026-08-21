@@ -1,13 +1,12 @@
 # Screenshots
 
-Three images, referenced from the project README. They are not committed yet —
-add them here with these exact names.
+Three images, referenced from the project README, with these exact names.
 
-| File | What it should show |
+| File | What it shows |
 | --- | --- |
-| `instances.png` | The sidebar with two or three servers in different states, and the Console tab of a running one. The status dots and live output are the point. |
-| `mods.png` | The Mods browser mid-search, cards with icons visible, and the source dropdown open or the version list showing. |
-| `map.png` | The Map tab with squaremap rendered — a world with something on it, not a fresh one. |
+| `console.png` | The Console tab: the row of tabs every instance has, the search box, the line count, the autoscroll toggle and copy, and the command input along the bottom. |
+| `mods.png` | The Mods browser mid-search against Modrinth, cards with their icons, and the "only what fits this Minecraft version" filter switched on. |
+| `map.png` | The Map tab with squaremap rendered, the notice that the map listens on `0.0.0.0`, and the address it was given. |
 
 Take them at a window size where nothing is cut off (1400x900 is comfortable),
 in dark mode, with no personal folder paths on screen. Check the parent folder

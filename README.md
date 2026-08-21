@@ -11,12 +11,13 @@ and backup stays on your machine.
 
 | | |
 | --- | --- |
-| ![The instance list and console](docs/screenshots/instances.png) | ![Browsing mods](docs/screenshots/mods.png) |
-| Your servers down the side, the console live in the middle. | Mods and plugins from Modrinth and CurseForge, with the version actually chosen rather than guessed. |
+| ![The console tab](docs/screenshots/console.png) | ![Browsing mods](docs/screenshots/mods.png) |
+| Every server gets the same tabs, and the console has search, autoscroll and copy. | Mods and plugins from Modrinth and CurseForge, filtered to what fits the server's own version. |
 
 ![The web map](docs/screenshots/map.png)
 
-The world in a browser, served by the server itself.
+The world in a browser, served by the server itself — and it says out loud that it
+listens on `0.0.0.0`.
 
 ---
 
