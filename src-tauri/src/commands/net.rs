@@ -44,12 +44,16 @@ pub struct NetworkView {
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../src/lib/bindings/")]
 pub struct MapAddresses {
-    /// BlueMap or Dynmap, as the tab names it.
     pub label: String,
     pub port: u16,
     pub addresses: Vec<NetAddress>,
     /// What this machine can see about the map's own port.
     pub local: LocalPort,
+    /// The address the map's web server binds to.
+    pub bind: Option<String>,
+    /// True when that bind lets other machines in, which squaremap's default
+    /// does. A map is then as public as the port forwarding allows.
+    pub reaches_the_network: bool,
 }
 
 #[tauri::command]
@@ -58,10 +62,16 @@ pub async fn network_view(state: State<'_, AppState>, id: i64) -> AppResult<Netw
     let path = row.path_buf();
 
     // Read before the blocking section, because it reads the map's config.
-    let map_kind = crate::map::detect(&row)?.map(|found| found.kind);
-    let map_port = match map_kind {
-        Some(kind) => crate::map::config::read_port(&row, kind).await?,
-        None => None,
+    let mapped = crate::map::detect(&row)?.is_some();
+    let map_port = if mapped {
+        crate::map::config::read_port(&row).await?
+    } else {
+        None
+    };
+    let map_bind = if mapped {
+        crate::map::config::read_bind(&row).await?
+    } else {
+        None
     };
 
     // Reading the properties file is blocking work, and so is walking the
@@ -93,11 +103,19 @@ pub async fn network_view(state: State<'_, AppState>, id: i64) -> AppResult<Netw
                 .map(|value| value == "true")
                 .unwrap_or(true),
             local: net::local_port_state(configured),
-            map: map_kind.zip(map_port).map(|(kind, port)| {
+            map: map_port.map(|port| {
                 let (addresses, _) = net::addresses(port);
                 MapAddresses {
-                    label: kind.label().to_string(),
+                    label: crate::map::LABEL.to_string(),
                     local: net::local_port_state(port),
+                    // squaremap binds 0.0.0.0 by default, so these addresses
+                    // really do work from other machines — said plainly rather
+                    // than listed as though they were loopback.
+                    reaches_the_network: map_bind
+                        .as_deref()
+                        .map(crate::map::config::reaches_the_network)
+                        .unwrap_or(false),
+                    bind: map_bind.clone(),
                     addresses,
                     port,
                 }

@@ -83,11 +83,12 @@ pub async fn install_server(
         // its own rather than failing the server install, which worked.
         if result.is_ok() {
             if let Ok(row) = instance::get(&state.db, id).await {
-                if let Some(kind) = crate::map::wanted(&row) {
-                    if crate::map::detect(&row).ok().flatten().is_none() {
+                // Asked for at create time, and not already there: a second
+                // install would only duplicate the jar.
+                if crate::map::wanted(&row) && crate::map::detect(&row).ok().flatten().is_none() {
+                    {
                         let map_cancel = tokio_util::sync::CancellationToken::new();
-                        match crate::map::install(&state, id, kind, &map_cancel, |_, _, _| {}).await
-                        {
+                        match crate::map::install(&state, id, &map_cancel, |_, _, _| {}).await {
                             Ok(message) => tracing::info!(
                                 instance = %row.name,
                                 instance_id = id,

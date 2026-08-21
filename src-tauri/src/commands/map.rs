@@ -1,10 +1,10 @@
-//! The Map tab's commands: what is installed, installing one, and the port.
+//! The Map tab's commands: what is installed, installing it, and the port.
 
 use tauri::{AppHandle, Manager, State};
 
 use crate::error::{AppError, AppResult};
 use crate::events;
-use crate::map::{self, MapKind, MapStatus};
+use crate::map::{self, MapStatus};
 use crate::state::AppState;
 use crate::{instance, mods};
 
@@ -13,63 +13,27 @@ pub async fn map_status(state: State<'_, AppState>, id: i64) -> AppResult<MapSta
     map::status(&state, id).await
 }
 
-/// One map a server type can run, as the create dialog's dropdown lists it.
-#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export, export_to = "../../src/lib/bindings/")]
-pub struct MapOption {
-    pub kind: MapKind,
-    pub label: String,
-    /// The one line that makes the difference between them visible.
-    pub summary: String,
-    pub default_port: u16,
-}
-
-/// The maps a server type can run, best first.
+/// Whether this server type can run squaremap, for the create dialog's box.
 #[tauri::command]
-pub async fn map_kinds_for(
-    server_type: crate::db::models::ServerType,
-) -> AppResult<Vec<MapOption>> {
-    Ok(map::kinds_for(server_type)
-        .into_iter()
-        .map(|kind| MapOption {
-            label: kind.label().to_string(),
-            summary: kind.summary().to_string(),
-            default_port: kind.default_port(),
-            kind,
-        })
-        .collect())
+pub async fn map_supported(server_type: crate::db::models::ServerType) -> AppResult<bool> {
+    Ok(map::supported(server_type))
 }
 
-/// Installs a map mod through the ordinary mod path, then puts it on a port
+/// Installs squaremap through the ordinary mod path, then puts it on a port
 /// nothing else is using.
 ///
 /// Returns a task id; progress arrives as `task://progress` like every other
 /// download, because this *is* a mod install — the only difference is that the
 /// project was chosen by this app rather than browsed for.
 #[tauri::command]
-pub async fn map_install(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: i64,
-    kind: MapKind,
-) -> AppResult<String> {
-    let row = instance::get(&state.db, id).await?;
-    if !kind.supports(row.server_type) {
-        return Err(AppError::Other(format!(
-            "{} does not run on a {} server.",
-            kind.label(),
-            row.server_type.label()
-        )));
-    }
-
+pub async fn map_install(app: AppHandle, state: State<'_, AppState>, id: i64) -> AppResult<String> {
     let (task_id, cancel) = state.tasks.register();
     let handle = app.clone();
     let returned = task_id.clone();
 
     tauri::async_runtime::spawn(async move {
         let state = handle.state::<AppState>();
-        let result = map::install(&state, id, kind, &cancel, |done, total, message| {
+        let result = map::install(&state, id, &cancel, |done, total, message| {
             events::task_progress(
                 &handle,
                 events::TaskProgressEvent {
@@ -106,35 +70,20 @@ pub async fn map_install(
     Ok(returned)
 }
 
-/// Lets BlueMap download the resources it renders with.
-///
-/// Its own default is to refuse, because the download is a Minecraft client jar
-/// from Mojang: turning it on says the user owns Minecraft: Java Edition and
-/// accepts Mojang's EULA. So it happens on a click, next to a sentence saying
-/// exactly that, and never on this app's own initiative.
-#[tauri::command]
-pub async fn map_accept_download(state: State<'_, AppState>, id: i64) -> AppResult<bool> {
-    let row = instance::get(&state.db, id).await?;
-    crate::map::config::accept_download(&row).await
-}
-
 /// Renders the parts of the world that were played before the map existed.
 ///
-/// Both maps draw chunks as they are loaded and saved, so a world with history
+/// squaremap draws chunks as they are loaded and saved, so a world with history
 /// behind it stays blank until it is asked. The command goes through the same
 /// console path a typed one does, so it is echoed and its output is visible.
 #[tauri::command]
 pub async fn map_render_world(state: State<'_, AppState>, id: i64) -> AppResult<String> {
     let row = instance::get(&state.db, id).await?;
-    let status = map::status(&state, id).await?;
-
-    let Some(command) = status.render_command else {
+    if map::detect(&row)?.is_none() {
         return Err(AppError::Other(format!(
             "\"{}\" has no web map installed.",
             row.name
         )));
-    };
-
+    }
     if !state.status_of(&row.uuid).is_live() {
         return Err(AppError::Other(format!(
             "\"{}\" has to be running for its map to render.",
@@ -142,8 +91,24 @@ pub async fn map_render_world(state: State<'_, AppState>, id: i64) -> AppResult<
         )));
     }
 
+    let command = map::render_command();
     crate::process::supervisor::send_command(&state, id, &command).await?;
     Ok(command)
+}
+
+/// Moves the map onto a free port, effective at the next start.
+#[tauri::command]
+pub async fn map_move_port(state: State<'_, AppState>, id: i64) -> AppResult<Option<u16>> {
+    let row = instance::get(&state.db, id).await?;
+    if state.status_of(&row.uuid).is_live() {
+        // A running map rewrites its config on shutdown, so an edit now would
+        // be thrown away — the same rule `server.properties` follows.
+        return Err(AppError::Other(format!(
+            "Stop \"{}\" before moving its map: a running server rewrites the file on shutdown.",
+            row.name
+        )));
+    }
+    map::move_to_free_port(&state, id).await
 }
 
 /// Removes the map mod again, and forgets the intent to have one.

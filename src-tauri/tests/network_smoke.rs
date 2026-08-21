@@ -41,7 +41,7 @@ async fn instance_in(
             max_ram_mb: None,
             notes: None,
             color: None,
-            web_map: None,
+            web_map: false,
         },
     )
     .await
@@ -1135,138 +1135,198 @@ async fn a_managed_jdk_downloads_unpacks_and_reports_its_version() {
     assert!(managed::list(&state).await.unwrap().is_empty());
 }
 
-/// Modrinth, live: both map projects publish a build this app would install for
-/// the server types it offers them on.
+/// The check that would have caught squaremap opening on 8080.
 ///
-/// The slugs and the loader filters are the whole integration — if either drifts
-/// the create dialog's checkbox silently produces a server with no map, and
-/// nothing else in the suite would notice.
+/// Everything else about the map can be right — the jar installed, the config
+/// parsed, the tab rendered — while the one number that matters is squaremap's
+/// default rather than the port this app picked. The fixture tests prove the
+/// parser agrees with itself; only starting a real server proves the file this
+/// app writes is the file squaremap reads.
+///
+/// Downloads a server and the map per case, boots it, and stops it.
 #[tokio::test]
-#[ignore = "hits the Modrinth API"]
-async fn both_map_mods_resolve_for_the_server_types_they_are_offered_on() {
-    use mc_server_manager_lib::map::{self, MapKind};
-    use mc_server_manager_lib::mods::source::{ModSource, SourceId, VersionFilter};
-    use mc_server_manager_lib::mods::AnySource;
+#[ignore = "downloads servers and the map mod, then boots each one"]
+async fn the_map_opens_on_the_port_this_app_chose() {
+    use mc_server_manager_lib::logparse::{self, LogEvent};
+    use mc_server_manager_lib::map;
+    use mc_server_manager_lib::process::launch;
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio_util::sync::CancellationToken;
 
-    let dir = tempfile::tempdir().unwrap();
-    let state = state_in(dir.path()).await;
-    let source = AnySource::build(&state, SourceId::Modrinth).await.unwrap();
-
-    // A version old enough that every project has shipped for it for years.
+    // A version squaremap has shipped for for years, so a failure here is
+    // about the port rather than about a build that does not exist.
     let mc_version = "1.20.1";
 
-    for (kind, server_type) in [
-        (MapKind::BlueMap, ServerType::Fabric),
-        (MapKind::BlueMap, ServerType::Paper),
-        (MapKind::Squaremap, ServerType::Fabric),
-        (MapKind::Squaremap, ServerType::Paper),
-        (MapKind::Squaremap, ServerType::NeoForge),
-        (MapKind::Dynmap, ServerType::Paper),
-        (MapKind::Dynmap, ServerType::Forge),
-    ] {
-        assert!(
-            kind.supports(server_type),
-            "{:?} is offered for {server_type:?}",
-            kind
-        );
-        let loader = mc_server_manager_lib::mods::loader_of(server_type, "smoke").unwrap();
+    // Both families it runs on: the config lands in a different folder for
+    // each, which is exactly the kind of thing that goes wrong unnoticed.
+    for server_type in [ServerType::Fabric, ServerType::Paper] {
+        let dir = tempfile::tempdir().unwrap();
+        let state = state_in(dir.path()).await;
+        let instance = instance_in(&state, dir.path(), "mapped", server_type, mc_version).await;
+        let cancel = CancellationToken::new();
+        mc_server_manager_lib::java::rescan(&state.db).await.unwrap();
 
-        let versions = source
-            .versions(
-                kind.project_slug(),
-                &VersionFilter {
-                    loaders: loader.accepted().iter().map(|l| l.to_string()).collect(),
-                    game_versions: vec![mc_version.to_string()],
-                },
-            )
+        // Hold squaremap's own default port while it is installed, so the port
+        // this app picks is *not* the one it would choose on its own. Without
+        // this the two numbers match by accident and the check proves nothing —
+        // which is exactly how 8080 slipped through.
+        let blocker = std::net::TcpListener::bind(("127.0.0.1", map::DEFAULT_PORT)).ok();
+
+        install::install(&state, &state.http, &instance, mc_version, None, &cancel, |_, _, _, _| {})
             .await
-            .unwrap_or_else(|err| panic!("{} versions for {loader:?}: {err}", kind.label()));
+            .expect("install the server");
+
+        let message = map::install(&state, instance.id, &cancel, |_, _, _| {})
+            .await
+            .unwrap_or_else(|err| panic!("install on {server_type:?}: {err}"));
+        println!("\n{server_type:?}: {message}");
+
+        let instance = instance::get(&state.db, instance.id).await.unwrap();
+        let chosen = map::config::read_port(&instance)
+            .await
+            .unwrap()
+            .expect("this app writes the config before the first start");
+
+        // And it went where squaremap will look for it.
+        assert!(
+            map::config::config_path(&instance).exists(),
+            "the config is at {:?}",
+            map::config::config_path(&instance)
+        );
+
+        assert_ne!(
+            chosen,
+            map::DEFAULT_PORT,
+            "the default was taken, so a different port had to be chosen"
+        );
+        // Freed before the server starts: a mod that ignores our config is then
+        // free to open its default, and the assertion below catches it.
+        drop(blocker);
+
+        // The EULA, written by the test rather than by the app.
+        std::fs::write(instance.path_buf().join("eula.txt"), "eula=true\n").unwrap();
+        std::fs::write(
+            instance.path_buf().join("server.properties"),
+            "server-port=25599\nmax-players=1\nonline-mode=false\nview-distance=4\n",
+        )
+        .unwrap();
+
+        let java = mc_server_manager_lib::java::best_for(&state.db, 17)
+            .await
+            .unwrap()
+            .expect("a Java 17+ runtime");
+        let plan = launch::plan(&instance, std::path::Path::new(&java.path)).unwrap();
+
+        let mut child = tokio::process::Command::new(&plan.program)
+            .args(&plan.args)
+            .current_dir(&plan.working_dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+
+        let mut stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+
+        // What squaremap says about its port. One line, and useful, but the
+        // wording is the mod's — so it is a bonus rather than the evidence.
+        let mut reported: Option<u16> = None;
+        let mut ready = false;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(600);
+        while tokio::time::Instant::now() < deadline && !ready {
+            let Ok(Ok(Some(raw))) =
+                tokio::time::timeout(std::time::Duration::from_secs(180), lines.next_line()).await
+            else {
+                break;
+            };
+            if let Some(port) = port_in_line(&raw) {
+                println!("{server_type:?}: {}", raw.trim());
+                reported = Some(port);
+            }
+            let (_, _, _, message) = logparse::parse_line(&raw, false);
+            if matches!(logparse::detect_event(&message), Some(LogEvent::Ready { .. })) {
+                ready = true;
+            }
+        }
+        assert!(ready, "the {server_type:?} server reached its Done line");
+
+        // The evidence that does not depend on anybody's log phrasing: the map
+        // is answering on the port this app chose, and nothing is answering on
+        // the one it would have used by itself.
+        let listening = wait_for_listener(chosen, std::time::Duration::from_secs(120)).await;
+        let default_taken =
+            wait_for_listener(map::DEFAULT_PORT, std::time::Duration::from_secs(1)).await;
+
+        stdin.write_all(b"stop\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        while let Ok(Some(_)) = lines.next_line().await {}
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(240), child.wait()).await;
 
         assert!(
-            !versions.is_empty(),
-            "{} publishes nothing for {loader:?} on {mc_version}",
-            kind.label()
+            listening,
+            "squaremap is not answering on {chosen}, the port this app configured"
         );
-        let file = versions[0]
-            .primary_file()
-            .unwrap_or_else(|| panic!("{} has a downloadable file", kind.label()));
         assert!(
-            file.file_name.to_ascii_lowercase().starts_with(match kind {
-                MapKind::BlueMap => "bluemap",
-                MapKind::Squaremap => "squaremap",
-                MapKind::Dynmap => "dynmap",
-            }),
-            "the jar is named after the project, which is how detection finds it: {}",
-            file.file_name
+            !default_taken,
+            "squaremap opened its own default {} instead of {chosen}",
+            map::DEFAULT_PORT
         );
-        println!("{} for {loader:?}: {}", kind.label(), file.file_name);
+        if let Some(reported) = reported {
+            assert_eq!(reported, chosen, "squaremap said {reported}");
+        }
     }
-
-    // And the defaults the app would pick are the ones just checked.
-    assert_eq!(map::default_for(ServerType::Fabric), Some(MapKind::BlueMap));
-    assert_eq!(map::default_for(ServerType::Paper), Some(MapKind::BlueMap));
 }
 
-/// Modrinth, live: squaremap still ships for the newest Minecraft this app
-/// installs, which is the claim that made it worth adding.
+/// Whether anything answers on a port within `patience`.
+async fn wait_for_listener(port: u16, patience: std::time::Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + patience;
+    loop {
+        if tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+/// The port out of squaremap's "Internal webserver running on 0.0.0.0:8080".
 ///
-/// Its Fabric build also depends on Fabric API, and the ordinary resolver is
-/// what has to notice that — a map installed without its dependency is a server
-/// that will not boot.
-#[tokio::test]
-#[ignore = "hits the Modrinth API"]
-async fn squaremap_ships_for_the_newest_minecraft_and_pulls_fabric_api() {
-    use mc_server_manager_lib::map::MapKind;
-    use mc_server_manager_lib::mods::resolve;
-    use mc_server_manager_lib::mods::source::{Loader, ModSource, SourceId, VersionFilter};
-    use mc_server_manager_lib::mods::AnySource;
+/// Matched by what the line is about rather than by its exact wording, and the
+/// number is taken from the end of the address.
+fn port_in_line(line: &str) -> Option<u16> {
+    let lower = line.to_ascii_lowercase();
+    if !(lower.contains("webserver") || lower.contains("web server")) {
+        return None;
+    }
+    if !(lower.contains("running") || lower.contains("started") || lower.contains("listening")) {
+        return None;
+    }
+    line.rsplit(':')
+        .next()?
+        .trim()
+        .trim_end_matches(['.', ')', '"'])
+        .parse()
+        .ok()
+}
 
-    let dir = tempfile::tempdir().unwrap();
-    let state = state_in(dir.path()).await;
-    let index = providers::index::refresh(&state.db, &state.http).await.unwrap();
-    let source = AnySource::build(&state, SourceId::Modrinth).await.unwrap();
-
-    let mc_version = "26.2";
-    let versions = source
-        .versions(
-            MapKind::Squaremap.project_slug(),
-            &VersionFilter {
-                loaders: vec!["fabric".into()],
-                game_versions: vec![mc_version.to_string()],
-            },
-        )
-        .await
-        .expect("squaremap versions");
-
-    let version = resolve::pick_version(&versions, Loader::Fabric, mc_version, &index)
-        .expect("squaremap publishes a Fabric build for 26.2");
-    println!(
-        "squaremap {} for Fabric {mc_version}: {}",
-        version.version_number,
-        version.primary_file().unwrap().file_name
+#[test]
+fn a_webserver_line_gives_up_its_port() {
+    // The line as squaremap really prints it.
+    assert_eq!(
+        port_in_line("[00:22:12] [main/INFO]: Internal webserver running on 0.0.0.0:8081"),
+        Some(8081)
     );
-
-    // Fabric API is a required dependency, and the plan is where that has to
-    // show up — the map alone would be a server that does not boot.
-    let plan = resolve::plan(
-        &source,
-        version,
-        Loader::Fabric,
-        mc_version,
-        &index,
-        &Default::default(),
-    )
-    .await
-    .expect("a plan");
-
-    let titles: Vec<&str> = plan
-        .install
-        .iter()
-        .map(|planned| planned.project_title.as_str())
-        .collect();
-    println!("plan: {titles:?}");
-    assert!(
-        titles.iter().any(|title| title.to_ascii_lowercase().contains("fabric api")),
-        "Fabric API has to come with it: {titles:?}"
+    // And it survives a reworded line, since the wording is the mod's.
+    assert_eq!(
+        port_in_line("[12:00:00] [main/INFO]: Internal webserver listening on 127.0.0.1:8085"),
+        Some(8085)
     );
+    // A line about something else keeps its number to itself.
+    assert_eq!(port_in_line("Done (7.214s)! For help, type \"help\""), None);
+    assert_eq!(port_in_line("[main/INFO]: Starting minecraft server version 1.20.1"), None);
 }

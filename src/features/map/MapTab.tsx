@@ -21,16 +21,16 @@ import type { InstanceView } from "@/lib/types";
 /**
  * The server's own web map, embedded.
  *
- * BlueMap and Dynmap each run a small web server inside the Minecraft server,
- * so there is nothing to render here — the work is pointing at the right port
- * and being honest about the two states where there is nothing to show: the
- * server is stopped, or the mod has not written its config yet.
+ * squaremap runs a small web server inside the Minecraft server, so there is
+ * nothing to render here — the work is pointing at the right port and being
+ * honest about the states where there is nothing to show: the server is
+ * stopped, the config has not been written yet, or nothing has been rendered.
  */
 export function MapTab({ instance }: { instance: InstanceView }) {
   // Reloading an iframe means changing its key: the page inside is not ours.
   const [reloads, setReloads] = useState(0);
-  const [allowing, setAllowing] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [moving, setMoving] = useState(false);
 
   const status = useQuery({
     queryKey: ["map", instance.id, instance.status],
@@ -47,14 +47,13 @@ export function MapTab({ instance }: { instance: InstanceView }) {
   }
 
   const map = status.data;
-  const mapName = map.label ?? "The map";
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge>
           <MapIcon className="mr-1 inline size-3.5" aria-hidden />
-          {mapName}
+          squaremap
         </Badge>
         {map.port ? (
           <>
@@ -87,7 +86,7 @@ export function MapTab({ instance }: { instance: InstanceView }) {
         </div>
       </div>
 
-      {map.downloadBlocked ? (
+      {map.conflict ? (
         <div className="rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
           <p className="flex items-start gap-2">
             <AlertTriangle
@@ -95,39 +94,51 @@ export function MapTab({ instance }: { instance: InstanceView }) {
               aria-hidden
             />
             <span>
-              BlueMap will not render until it is allowed to download a Minecraft client jar
-              from Mojang, which is where it gets block textures. Its config currently says no,
-              and the server stops on start with "BlueMap is missing important resources!".
-              Allowing it says you own Minecraft: Java Edition and accept Mojang's EULA.
+              Port {map.port} is also used by {map.conflict}. Whichever server starts second will
+              have no map.
             </span>
           </p>
-          <Button
-            size="sm"
-            className="mt-2"
-            disabled={allowing}
-            onClick={() => {
-              setAllowing(true);
-              ipc
-                .mapAcceptDownload(instance.id)
-                .then(() => status.refetch())
-                .catch((error: unknown) => toastError(error))
-                .finally(() => setAllowing(false));
-            }}
-          >
-            {allowing ? "Saving…" : "Allow the download"}
-          </Button>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={map.running || moving}
+              onClick={() => {
+                setMoving(true);
+                ipc
+                  .mapMovePort(instance.id)
+                  .then((port) => {
+                    void status.refetch();
+                    toast.success(port ? `The map will use port ${port}` : "Nothing to change", {
+                      description: port
+                        ? "Takes effect the next time this server starts."
+                        : undefined,
+                    });
+                  })
+                  .catch((error: unknown) => toastError(error))
+                  .finally(() => setMoving(false));
+              }}
+            >
+              {moving ? "Moving…" : "Move to a free port"}
+            </Button>
+            <span className="text-muted-foreground">
+              {map.running
+                ? "Stop the server first: a running server rewrites the file on shutdown."
+                : `Edits ${map.configPath ?? "the map's config"}.`}
+            </span>
+          </div>
         </div>
       ) : null}
 
       {map.barelyRendered && map.port ? (
-        // A map with nothing rendered is a black rectangle, which reads as
-        // broken rather than as empty. Both maps draw chunks as they are
+        // A map with nothing rendered is a blank rectangle, which reads as
+        // broken rather than as empty. squaremap draws chunks as they are
         // played, so a new world is *supposed* to look like this.
         <div className="rounded-md border border-border px-3 py-2 text-xs">
           <p className="flex items-start gap-2">
             <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <span>
-              {mapName} renders areas as they are explored and saved. A new world will look
+              squaremap renders areas as they are explored and saved. A new world will look
               mostly empty until you have played in it.
             </span>
           </p>
@@ -162,15 +173,15 @@ export function MapTab({ instance }: { instance: InstanceView }) {
         </div>
       ) : null}
 
-      {map.conflict ? (
-        <p className="flex items-start gap-2 rounded-md border border-[var(--status-starting)]/40 bg-[var(--status-starting)]/10 px-3 py-2 text-xs">
-          <AlertTriangle
-            className="mt-0.5 size-3.5 shrink-0 text-[var(--status-starting)]"
-            aria-hidden
-          />
+      {map.reachesTheNetwork && map.port ? (
+        // squaremap binds 0.0.0.0 by default, so this is not a private page on
+        // this computer — saying so here is the difference between a choice and
+        // a surprise.
+        <p className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">
+          <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
           <span>
-            Port {map.port} is also used by {map.conflict}. Whichever server starts second will
-            have no map — change it in {map.configPath ?? "the map's config"}.
+            This map listens on {map.bind ?? "0.0.0.0"}, so anyone who can reach this computer on
+            port {map.port} can see it. The Networking tab lists the addresses that reach it.
           </span>
         </p>
       ) : null}
@@ -178,7 +189,7 @@ export function MapTab({ instance }: { instance: InstanceView }) {
       {!map.port ? (
         <Placeholder
           title="No map address yet"
-          detail={`${mapName} writes its configuration the first time the server starts. Start the server once, then come back.`}
+          detail="squaremap writes its configuration the first time the server starts. Start the server once, then come back."
         />
       ) : !map.running ? (
         <Placeholder

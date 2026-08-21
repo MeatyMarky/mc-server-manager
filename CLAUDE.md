@@ -262,76 +262,79 @@ by the id's own suffix — they are what people go looking for by name. `old_alp
 are dropped entirely: Mojang published no server jar before 1.2.5.
 
 ### The web map is somebody else's software
-BlueMap, squaremap and Dynmap have spent years on chunk rendering and browser tiles; this app
-installs one and gets out of the way. All three come from Modrinth through the ordinary
-`ModSource` path (`map::install` resolves the slug, then reuses `resolve::plan` and
-`install_planned`), so there is no second downloader, no second allowlist, and a dependency
-like squaremap's Fabric API arrives the way it does for any other mod.
+squaremap has spent years on chunk rendering and browser tiles; this app installs it and gets
+out of the way. It arrives through the ordinary `ModSource` path (`map::install` resolves the
+slug, then reuses `resolve::plan` and `install_planned`), so there is no second downloader, no
+second allowlist, and its Fabric API dependency comes along the way it does for any other mod.
 
-`MapKind::supports` is the offer, and it is per project: BlueMap on the three loaders and the
-Bukkit family, squaremap on Fabric/NeoForge/Paper/Purpur, Dynmap on Paper/Purpur and Forge.
-Vanilla is offered none rather than a failure, and squaremap is not offered for Forge because
-its last Forge build is 1.2.0, for 1.20.1 alone. `summary()` is the line that makes the choice
-a choice — 3D and looks, speed and low disk, plugin integrations — and the create dialog's
-dropdown shows it beside each name.
+One map, on purpose. BlueMap and Dynmap were both supported for a while and both were removed:
+BlueMap needs a Mojang download accepted, WebGL in the webview and minutes before anything
+appears, and Dynmap is heavier still. squaremap is 2D Leaflet tiles, quick to a usable map,
+small on disk, and has no first-run gate. One kind means one config format, one URL shape and
+one render command — and every path in the module is one that actually runs. The multi-kind
+version had a hand-written `[BlueMap, Dynmap]` list inside `detect`, so squaremap was
+installed, running, and invisible to the whole feature.
 
-Everything that differs between them is a method on `MapKind`, so a fourth map is that list
-and nothing else: slug, label, default port, jar prefix, config path, render command, view
-URL. Two of those are worth remembering because they are *not* uniform — squaremap keeps its
-port at a nested YAML path (`settings.internal-webserver.port`, which a flat scan for `port`
-gets wrong), and it names worlds by dimension (`minecraft_overworld`, `minecraft:overworld`)
-rather than by `level-name`.
+`map::supported` is the offer: Fabric, NeoForge, Paper and Purpur. Vanilla loads no mods, and
+Forge is left out because squaremap's last Forge build is 1.2.0, for 1.20.1 alone.
 
-The port is **read from the mod's own config**, never assumed: `map::config` parses BlueMap's
-HOCON `port:` and Dynmap's YAML `webserver-port:`, keeps every other line byte for byte on a
-write, and treats a commented-out key as absent. A user who moves the port keeps their map.
-The config does not exist until the server's first start, so "installed but no port yet" is a
-normal state with its own sentence rather than an error.
+The port is **read from squaremap's own config**, never assumed, and it lives at a nested
+path — `settings.internal-webserver.port` — with other keys called `port` around it, so it is
+found by walking the indentation rather than by scanning for the name. A write keeps every
+other line byte for byte. The config is written **before** the first start, because squaremap
+writes its own on that start and a port set afterwards only takes effect on the next one;
+it creates a config only where none exists, so nothing is ever overwritten. Where the file
+goes was confirmed against a real install rather than assumed: `<instance>/squaremap/` on the
+mod loaders, `plugins/squaremap/` on the Bukkit family.
 
-BlueMap's configs are written **before** its first start, not edited after it. Two reasons:
-`accept-download` defaults to false and BlueMap stops on the first start without it ("BlueMap
-is missing important resources!"), and a port set after that start only takes effect on the
-next one. BlueMap writes a config only where none exists, so pre-writing settles both — and
-neither file is ever overwritten, so a user who turns the download back off keeps that answer;
-the Map tab then offers to turn it on again, on a click. `accept-download: true` is a
-statement made on the user's behalf, because BlueMap downloads a Minecraft client jar from
-Mojang for its textures — so the create dialog's checkbox says exactly that, and the tick is
-the permission. Dynmap has no equivalent gate.
+squaremap binds `0.0.0.0`, so the map is on the network from its first start. `MapStatus`
+carries the bind address and `reaches_the_network`, and both the Map tab and the Networking
+tab say so plainly rather than presenting a loopback address as the whole truth.
 
 A map is a second port, so `map::conflict_for` checks a candidate against every other
 instance's game *and* map port, and the Networking tab lists the map's addresses beside the
-game's — somebody who forwards 25565 and stops has forwarded half of what they meant to.
+game's. `move_to_free_port` is the repair when something takes the port anyway, or when the
+mod was installed by hand: it edits the config that now exists, effective at the next start.
+
 The Map tab embeds the local URL in a sandboxed iframe (`frame-src` allows loopback only) and
-says which of the two "nothing to show" states applies: the server is stopped, or the config
-has not been written yet.
+names each empty state: the server is stopped, the config has not been written yet, or nothing
+has been rendered.
 
 ### An empty map is not a broken one, and it says so
-Both maps draw chunks as they are played and saved, so a freshly installed one is a black
+squaremap draws chunks as they are played and saved, so a freshly installed map is a blank
 rectangle — which reads as a failure. `map::barely_rendered` counts files under the tile
 folder, stopping at `RENDERED_ENOUGH` (12) because the question is "is this empty", not "how
 big is it", and the tab explains the emptiness rather than showing it bare. The way out is
-`render_command` (`bluemap update <world>` / `dynmap fullrender <world>`), sent through the
-ordinary console path so it is echoed and its progress is readable, and offered only while
-the server is running.
+`render_command` (`squaremap fullrender minecraft:overworld`), sent through the ordinary
+console path so it is echoed and its progress is readable, and offered only while the server
+is running.
 
 The view opens on the world's spawn, read from the same `level.dat` the Worlds tab parses
-(`SpawnX`/`SpawnY`/`SpawnZ`). A map centred on 0,0 is centred on nothing in particular when
-the spawn is three thousand blocks away, which is its own way of looking broken. `view_url`
-builds the position for each project — BlueMap's URL fragment, Dynmap's query parameters —
-in Rust, and falls back to the plain address when there is no spawn to point at rather than
-guessing one. The world name comes from `level-name`, so a renamed world still finds its map.
+(`SpawnX`/`SpawnZ`). A map centred on 0,0 is centred on nothing in particular when the spawn
+is three thousand blocks away, which is its own way of looking broken. `view_url` builds the
+position in Rust and falls back to the plain address when there is no spawn to point at.
+squaremap names worlds by dimension (`minecraft_overworld` in the URL, `minecraft:overworld`
+in the command), so `level-name` appears in neither.
+
+### Only a live start proves the config landed
+Fixture tests prove the parser agrees with itself; they cannot prove the file this app writes
+is the file the mod reads. `the_map_opens_on_the_port_this_app_chose` in `network_smoke`
+installs the map on Fabric and on Paper, holds squaremap's default port so the allocation has
+to differ from it, boots a real server, and asserts the map answers on the chosen port and
+*not* on 8080. That is the check that was missing when squaremap shipped opening on its
+default.
+
 
 ### Stopping a mapped server is a sequence, and every line of it is echoed
 A map mod is a web server and a render thread pool inside the same JVM, so a stop gets
 `MAP_STOP_GRACE` (45 s) on top of the configured timeout, and `stop_sequence` sends
-`save-all flush` — then `bluemap stop` for BlueMap — before `stop` itself. The flush comes
-first on purpose: a map's shutdown runs alongside the server's, BlueMap has been seen to throw
-inside its own (an NPE on `pluginState` with a player online), and a flush that already
-happened costs nothing. Everything sent on the way down is echoed into the console as
-`> command`, because a stop that produced no "Stopping the server" line left nothing to say
-whether the command was ever sent. A `stop` that cannot be delivered at all — the stdin writer
-task is gone — escalates immediately with a sentence, rather than waiting out a timeout it
-cannot survive, and `finish_stop` logs the stage reached at info.
+`save-all flush` before `stop` itself. The flush comes first on purpose: a map's shutdown runs
+alongside the server's, and a mod throwing inside its own is not something this app can
+prevent — but the world being on disk already is. Everything sent on the way down is echoed
+into the console as `> command`, because a stop that produced no "Stopping the server" line
+left nothing to say whether the command was ever sent. A `stop` that cannot be delivered at
+all — the stdin writer task is gone — escalates immediately with a sentence rather than
+waiting out a timeout it cannot survive, and `finish_stop` logs the stage reached at info.
 
 ### Addresses are labelled by block, never by adapter name
 Adapter names are localised, renamed and driver-specific; the address block is the stable

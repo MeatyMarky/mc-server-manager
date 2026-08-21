@@ -214,6 +214,13 @@ export function NetworkingTab({ instance }: { instance: InstanceView }) {
                 second thing to forward. Forwarding the game port alone leaves the map
                 unreachable from outside.
               </p>
+              <p className="text-xs text-muted-foreground">
+                {data.map.reachesTheNetwork
+                  ? `It listens on ${data.map.bind ?? "0.0.0.0"}, so these addresses already work
+                     from other machines on the network — no forwarding needed for them.`
+                  : `It listens on ${data.map.bind ?? "127.0.0.1"}, so only this computer can
+                     open it, whatever the router does.`}
+              </p>
             </header>
 
             <ul className="grid gap-2">

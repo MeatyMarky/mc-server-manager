@@ -52,7 +52,7 @@ export function InstanceDetail({ instance }: { instance: InstanceView }) {
     queryKey: ["map", instance.id, instance.status],
     queryFn: () => ipc.mapStatus(instance.id),
   });
-  const hasMap = Boolean(map.data?.kind);
+  const hasMap = Boolean(map.data?.installed);
   const [renaming, setRenaming] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [deleting, setDeleting] = useState(false);

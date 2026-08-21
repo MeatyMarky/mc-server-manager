@@ -111,7 +111,7 @@ mod tests {
                 max_ram_mb: None,
                 notes: None,
                 color: None,
-                web_map: None,
+                web_map: false,
             },
         )
         .await

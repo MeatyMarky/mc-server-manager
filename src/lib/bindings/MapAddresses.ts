@@ -5,12 +5,17 @@ import type { NetAddress } from "./NetAddress";
 /**
  * The same addresses, for the map's port.
  */
-export type MapAddresses = { 
-/**
- * BlueMap or Dynmap, as the tab names it.
- */
-label: string, port: number, addresses: Array<NetAddress>, 
+export type MapAddresses = { label: string, port: number, addresses: Array<NetAddress>, 
 /**
  * What this machine can see about the map's own port.
  */
-local: LocalPort, };
+local: LocalPort, 
+/**
+ * The address the map's web server binds to.
+ */
+bind: string | null, 
+/**
+ * True when that bind lets other machines in, which squaremap's default
+ * does. A map is then as public as the port forwarding allows.
+ */
+reachesTheNetwork: boolean, };

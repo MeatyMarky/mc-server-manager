@@ -20,7 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useProviderBuilds } from "@/features/setup/queries";
 import { errorMessage, ipc } from "@/lib/ipc";
 import { SERVER_TYPES, SERVER_TYPE_LABEL } from "@/lib/status";
-import type { MapKind, ServerType } from "@/lib/types";
+import type { ServerType } from "@/lib/types";
 import { useAppInfo, useCreateInstance } from "./queries";
 import { VersionTable } from "./VersionTable";
 
@@ -43,16 +43,14 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
   const [mcVersion, setMcVersion] = useState("");
   const [build, setBuild] = useState("");
   const [maxRam, setMaxRam] = useState(4096);
-  const [webMap, setWebMap] = useState<MapKind | "">("");
+  const [webMap, setWebMap] = useState(false);
 
-  // Which maps this server type can run, and how they differ. Vanilla loads
-  // none, so the whole row disappears rather than offering a failure.
-  const mapKinds = useQuery({
-    queryKey: ["map-kinds", serverType],
-    queryFn: () => ipc.mapKindsFor(serverType),
+  // squaremap runs on the loaders and the Bukkit family; vanilla loads no mods
+  // at all, so the whole row disappears rather than offering a failure.
+  const mapSupported = useQuery({
+    queryKey: ["map-supported", serverType],
+    queryFn: () => ipc.mapSupported(serverType),
   });
-  const mapOptions = mapKinds.data ?? [];
-  const chosenMap = mapOptions.find((option) => option.kind === webMap);
 
   // Builds depend on both choices, so the dropdown only has something to show
   // once a version is picked. Vanilla has none at all.
@@ -72,7 +70,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
   }, [serverType]);
 
   useEffect(() => setBuild(""), [mcVersion]);
-  useEffect(() => setWebMap(""), [serverType]);
+  useEffect(() => setWebMap(false), [serverType]);
 
   // The folder name is derived in Rust, never assembled here.
   useEffect(() => {
@@ -109,7 +107,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
     setBuild("");
     setServerType("paper");
     setMaxRam(4096);
-    setWebMap("");
+    setWebMap(false);
   }
 
   async function submit(event: React.FormEvent) {
@@ -133,7 +131,7 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
         maxRamMb: maxRam,
         notes: null,
         color: null,
-        webMap: webMap === "" ? null : webMap,
+        webMap,
       });
       reset();
       onOpenChange(false);
@@ -275,38 +273,24 @@ export function CreateInstanceDialog({ open: isOpen, onOpenChange }: Props) {
             ) : null}
           </div>
 
-          {mapOptions.length > 0 ? (
-            <div className="grid gap-2">
-              <Label htmlFor="instance-map">Web map</Label>
-              <Select
-                id="instance-map"
-                value={webMap}
-                onChange={(event) => setWebMap(event.target.value as MapKind | "")}
-              >
-                <option value="">None</option>
-                {mapOptions.map((option) => (
-                  <option key={option.kind} value={option.kind}>
-                    {option.label} — {option.summary}
-                  </option>
-                ))}
-              </Select>
-              {chosenMap ? (
-                <p className="text-xs text-muted-foreground">
-                  Installed after the server files, on a free port near {chosenMap.defaultPort}.
-                  It renders the world in a browser and gets its own tab here.
-                </p>
-              ) : null}
-              {chosenMap?.kind === "blue_map" ? (
-                // BlueMap will not render without this, and it is a download
-                // made on the user's behalf: saying it here is what makes
-                // choosing it the permission for it.
-                <p className="text-xs text-muted-foreground">
-                  BlueMap downloads a Minecraft client jar from Mojang the first time the server
-                  starts, to take block textures out of it. Choosing it says you own Minecraft:
-                  Java Edition and accept Mojang's EULA.
-                </p>
-              ) : null}
-            </div>
+          {mapSupported.data ? (
+            <label className="flex items-start gap-2 rounded-md border border-border p-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                checked={webMap}
+                onChange={(event) => setWebMap(event.target.checked)}
+              />
+              <span>
+                Web map (squaremap)
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Installed after the server files, on a port nothing else is using. It draws the
+                  world as flat tiles in a browser and gets its own tab here. Its web server
+                  listens on every address this computer has, so anyone who can reach the machine
+                  can see the map.
+                </span>
+              </span>
+            </label>
           ) : null}
 
           <DialogFooter>

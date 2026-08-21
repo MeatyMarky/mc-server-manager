@@ -37,31 +37,24 @@ const EXIT_POLL: Duration = Duration::from_millis(200);
 /// What is sent before "stop" when a map mod is installed.
 ///
 /// The world is flushed first: a map mod's shutdown runs alongside the server's,
-/// and BlueMap has been seen to throw inside its own (an NPE on `pluginState`
-/// with a player online). A flush that has already happened costs nothing, and
-/// it means no version of that failure can cost anybody their last few minutes.
+/// and a map mod throwing inside its own is not something this app can prevent.
+/// A flush that has already happened costs nothing, and it means no version of
+/// that failure can cost anybody their last few minutes.
 ///
-/// BlueMap is then asked to stop itself, so its render threads and web server
-/// come down before the server's shutdown rather than during it. Dynmap has no
-/// console command worth sending, so it gets the flush alone.
-fn stop_sequence(kind: Option<crate::map::MapKind>) -> Vec<&'static str> {
-    match kind {
-        None => Vec::new(),
-        Some(crate::map::MapKind::BlueMap) => vec!["save-all flush", "bluemap stop"],
-        // Neither of these has a stop command worth sending: squaremap's render
-        // threads come down with the server, and Dynmap's likewise. The flush
-        // still applies, because it is the world that matters.
-        Some(crate::map::MapKind::Squaremap) | Some(crate::map::MapKind::Dynmap) => {
-            vec!["save-all flush"]
-        }
+/// squaremap has no stop command worth sending — its render threads come down
+/// with the server — so the flush is the whole of it.
+fn stop_sequence(mapped: bool) -> Vec<&'static str> {
+    match mapped {
+        false => Vec::new(),
+        true => vec!["save-all flush"],
     }
 }
 
 /// Extra time a server with a map mod gets before the stop escalates.
 ///
-/// BlueMap flushes render state and shuts a web server down inside the same
-/// JVM, and a server that would stop in ten seconds on its own can take most of
-/// a minute with one installed.
+/// squaremap shuts a web server and a render pool down inside the same JVM,
+/// and a server that would stop in ten seconds on its own can take longer with
+/// one installed.
 const MAP_STOP_GRACE: Duration = Duration::from_secs(45);
 
 /// How long the map is given to put itself down before the server is stopped.
@@ -1111,10 +1104,10 @@ pub async fn stop(app: &AppHandle, state: &AppState, id: i64) -> AppResult<StopS
     let instance = instance::get(&state.db, id).await?;
 
     // A map mod is a web server and a pool of render threads inside the same
-    // JVM, and BlueMap flushes its render state on the way out. The configured
-    // timeout is what a plain server needs; this is what a mapped one does.
-    let map = crate::map::detect(&instance)?;
-    let extra = if map.is_some() { MAP_STOP_GRACE } else { Duration::ZERO };
+    // JVM. The configured timeout is what a plain server needs; this is what a
+    // mapped one does.
+    let mapped = crate::map::detect(&instance)?.is_some();
+    let extra = if mapped { MAP_STOP_GRACE } else { Duration::ZERO };
     let timeout = Duration::from_secs(instance.stop_timeout_s.clamp(5, 3_600) as u64) + extra;
 
     let running = state
@@ -1144,7 +1137,7 @@ pub async fn stop(app: &AppHandle, state: &AppState, id: i64) -> AppResult<StopS
         stdin.send(format!("{command}\n")).is_ok()
     };
 
-    let before_stop = stop_sequence(map.as_ref().map(|found| found.kind));
+    let before_stop = stop_sequence(mapped);
     if !before_stop.is_empty() {
         for command in &before_stop {
             say(command);
@@ -1178,7 +1171,7 @@ pub async fn stop(app: &AppHandle, state: &AppState, id: i64) -> AppResult<StopS
         instance = %instance.name,
         instance_id = instance.id,
         timeout_s = timeout.as_secs(),
-        map = map.as_ref().map(|found| found.kind.label()).unwrap_or("none"),
+        mapped,
         "sent stop on stdin"
     );
 
@@ -1559,6 +1552,18 @@ mod tests {
         let instance_dir = dir.join("modded");
         std::fs::create_dir_all(&instance_dir).unwrap();
         std::fs::write(instance_dir.join("server.jar"), b"jar").unwrap();
+        // A port nothing on this machine is using: preflight checks the port
+        // before it checks the Java, and 25565 is often taken by whatever the
+        // person running these tests happens to have started.
+        let free = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        std::fs::write(
+            instance_dir.join("server.properties"),
+            format!("server-port={port}
+"),
+        )
+        .unwrap();
 
         sqlx::query(
             "INSERT INTO instances (uuid, name, path, server_type, mc_version, launch_kind,
@@ -1639,38 +1644,22 @@ mod tests {
 
     #[test]
     fn a_plain_server_is_stopped_with_nothing_but_stop() {
-        assert!(stop_sequence(None).is_empty());
+        assert!(stop_sequence(false).is_empty());
     }
 
     #[test]
-    fn every_map_flushes_the_world_before_the_stop() {
-        for kind in crate::map::ALL_KINDS {
-            let sequence = stop_sequence(Some(kind));
-            assert_eq!(sequence.first(), Some(&"save-all flush"), "{kind:?}");
-        }
-    }
-
-    #[test]
-    fn a_mapped_server_flushes_the_world_before_anything_else() {
-        // Order matters: the flush has to precede the map's own shutdown, which
-        // is where the failure that prompted this happens.
-        let bluemap = stop_sequence(Some(crate::map::MapKind::BlueMap));
-        assert_eq!(bluemap, vec!["save-all flush", "bluemap stop"]);
-        assert_eq!(bluemap[0], "save-all flush");
-
-        // Dynmap has no console command worth sending; the flush still applies.
-        assert_eq!(
-            stop_sequence(Some(crate::map::MapKind::Dynmap)),
-            vec!["save-all flush"]
-        );
+    fn a_mapped_server_flushes_the_world_before_the_stop() {
+        // The map's shutdown runs alongside the server's, so the world goes to
+        // disk before either of them starts.
+        assert_eq!(stop_sequence(true), vec!["save-all flush"]);
     }
 
     #[test]
     fn nothing_in_the_stop_sequence_is_the_stop_itself() {
         // `stop` is sent separately, and its failure is what escalates. A copy
         // in here would stop the server before the map had come down.
-        for kind in [None, Some(crate::map::MapKind::BlueMap), Some(crate::map::MapKind::Dynmap)] {
-            assert!(!stop_sequence(kind).contains(&"stop"), "{kind:?}");
+        for mapped in [true, false] {
+            assert!(!stop_sequence(mapped).contains(&"stop"), "{mapped}");
         }
     }
 

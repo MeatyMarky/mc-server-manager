@@ -98,12 +98,10 @@ pub async fn create(state: &AppState, input: CreateInstanceInput) -> AppResult<I
     // A web map is a wish at this point, not a mod: the folder it installs into
     // does not exist until the server is installed, so the choice is recorded
     // and acted on when that finishes.
-    // Only a map this server type can actually run: a choice that arrived for
-    // the wrong type is dropped rather than installed and left to fail.
-    let map_kind = input
-        .web_map
-        .filter(|kind| kind.supports(input.server_type))
-        .map(|kind| kind.as_str().to_string());
+    // Only where this server type can actually run it: a request that arrived
+    // for the wrong type is dropped rather than installed and left to fail.
+    let map_kind = (input.web_map && crate::map::supported(input.server_type))
+        .then(|| crate::map::SLUG.to_string());
 
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO instances (
@@ -609,7 +607,7 @@ mod tests {
             max_ram_mb: None,
             notes: None,
             color: None,
-            web_map: None,
+            web_map: false,
         }
     }
 

@@ -151,7 +151,7 @@ pub struct Instance {
     pub process_start_time: Option<i64>,
     pub installed_artifact_url: Option<String>,
     pub installed_at: Option<String>,
-    /// The web map this instance is meant to have, as a `MapKind`. The port is
+    /// Set to `squaremap` when this instance is meant to have a web map. The port is
     /// not stored: it is read from the map mod's own config, which the user is
     /// free to edit.
     pub map_kind: Option<String>,

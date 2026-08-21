@@ -28,10 +28,10 @@ pub struct CreateInstanceInput {
     pub max_ram_mb: Option<i64>,
     pub notes: Option<String>,
     pub color: Option<String>,
-    /// The web map to install, when one was chosen. Installed after the server
-    /// itself, because it goes into a folder that does not exist yet.
+    /// Whether to install the web map. It goes in after the server itself,
+    /// because it lands in a folder that does not exist yet.
     #[serde(default)]
-    pub web_map: Option<crate::map::MapKind>,
+    pub web_map: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
