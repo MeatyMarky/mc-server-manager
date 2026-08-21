@@ -171,11 +171,10 @@ pub fn manual_steps(gateway: Option<&str>, local_ip: &str, port: u16) -> Vec<Str
         "Find the section called Port Forwarding, Virtual Server, or NAT.".to_string(),
         format!("Forward external port {port} (TCP) to {local_ip} port {port}."),
         "Save, then use the outside check above to confirm it worked.".to_string(),
-        format!(
-            "If the check still fails, the port may be blocked by this computer's firewall, or \
-             your connection may not have a public address of its own — ask your provider about \
-             CGNAT before changing more router settings."
-        ),
+        "If the check still fails, the port may be blocked by this computer's firewall, or your \
+         connection may not have a public address of its own — ask your provider about CGNAT \
+         before changing more router settings."
+            .to_string(),
     ]
 }
 

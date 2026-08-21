@@ -1,0 +1,17 @@
+# The Rust this project is built and linted with, everywhere.
+#
+# CI ran `stable` and this machine ran `stable`, and they were four months
+# apart: a clippy lint that did not exist locally (`useless_format`, 1.98)
+# failed the build on a commit that was green here. `-D warnings` makes every
+# new lint a build break, so "stable" is not a version — it is whatever landed
+# this week.
+#
+# rustup reads this file before every cargo command in this directory and
+# installs the toolchain if it is missing, so a contributor and a runner agree
+# without either of them being told.
+#
+# Moving it is a deliberate act: bump the version, run the gate, fix whatever
+# the new lints found, and commit that together.
+[toolchain]
+channel = "1.98"
+components = ["clippy", "rustfmt"]

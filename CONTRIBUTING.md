@@ -2,8 +2,12 @@
 
 ## Building
 
-You need [Rust](https://rustup.rs) (stable), [Node 24+](https://nodejs.org) and
-[pnpm](https://pnpm.io) 11. On Linux you also need the WebKitGTK development
+You need [Rust](https://rustup.rs), [Node 24+](https://nodejs.org) and
+[pnpm](https://pnpm.io) 11. The Rust version is pinned in `rust-toolchain.toml`
+and rustup installs it for you on the first `cargo` command — do not reach for
+`stable`, because `-D warnings` turns every lint added to a newer compiler into
+a build break, and CI would then fail on a commit that was green on your
+machine. On Linux you also need the WebKitGTK development
 packages Tauri builds against:
 
 ```bash

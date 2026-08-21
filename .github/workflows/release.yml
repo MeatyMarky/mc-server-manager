@@ -28,7 +28,7 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The build stamps the commit into the binary, so it needs real
           # history rather than a shallow checkout.
@@ -40,13 +40,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned by rust-toolchain.toml, so a tag builds with the toolchain the
+      # tests were written against.
+      - name: Install the pinned toolchain
+        run: rustup show
 
       - uses: pnpm/action-setup@v4
         with:
           version: 11
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
@@ -80,7 +83,7 @@ jobs:
       - name: Build installers
         run: pnpm tauri build ${{ matrix.args }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           if-no-files-found: error
@@ -97,9 +100,9 @@ jobs:
     steps:
       # The notes are written by hand and live in the repo, so the release says
       # what the version is for rather than listing commit subjects.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
 
