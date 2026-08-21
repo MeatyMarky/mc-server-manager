@@ -33,6 +33,12 @@ pub enum Reconciliation {
 ///
 /// A recorded pid without a recorded start time is not trusted: an old database
 /// row could otherwise adopt (and later kill) an unrelated process.
+///
+/// Start times are seconds, so a pid reused by a process that started in the
+/// same second as the recorded one cannot be told apart from it. That is
+/// harmless where this runs: a recorded start time comes from a previous
+/// session of this app, so a collision would need the recycling process to have
+/// started in the same second as a process that ended before the app did.
 pub fn decide(
     recorded_pid: Option<i64>,
     recorded_start_time: Option<i64>,

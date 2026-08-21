@@ -15,10 +15,16 @@ use mc_server_manager_lib::process::supervisor::process_start_time;
 use mc_server_manager_lib::state::AppState;
 
 /// A process that stays alive long enough to be inspected, on either platform.
+///
+/// Spawned directly rather than through a shell: `cmd /C ping` hands back the
+/// pid of `cmd`, so the process being measured is not the process doing the
+/// waiting, and killing it leaves `ping.exe` orphaned for a full minute. Four
+/// tests doing that per run left the CI runner churning through pids, which is
+/// the pressure that makes a freed pid get reused immediately.
 fn spawn_long_lived() -> Child {
     let mut command = if cfg!(windows) {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "ping -n 60 127.0.0.1 > NUL"]);
+        let mut command = Command::new("ping");
+        command.args(["-n", "60", "127.0.0.1"]);
         command
     } else {
         let mut command = Command::new("sleep");
@@ -152,7 +158,7 @@ async fn a_process_that_ended_leaves_the_instance_crashed() {
 }
 
 /// The start time of a live process is stable, which is what makes the whole
-/// scheme work; a dead pid reports nothing.
+/// scheme work; once the process ends, its pid stops being adoptable.
 #[test]
 fn start_times_identify_a_process() {
     let mut child = spawn_long_lived();
@@ -172,5 +178,36 @@ fn start_times_identify_a_process() {
 
     child.kill().unwrap();
     child.wait().unwrap();
-    assert_eq!(process_start_time(pid), None);
+
+    // What happens to a pid the moment its process ends is not the same on both
+    // platforms. A reaped Unix pid leaves the process table at once. Windows
+    // makes no such promise: the pid can still be reported for a moment, and it
+    // can be handed straight to a new process — CI has seen `Some(..)` here on a
+    // Windows runner where this machine reports `None` in 700 consecutive
+    // attempts, idle and under process churn alike.
+    //
+    // The rule that has to hold on both is the one the pid guard exists for, so
+    // that is what is asserted: whatever the process table says afterwards, the
+    // recorded pid must no longer be adoptable. A start time that still matches
+    // would mean a dead process being recognised as ours — the exact case the
+    // guard is for — so it fails loudly rather than being tolerated.
+    let after = process_start_time(pid);
+    assert_ne!(
+        after,
+        Some(first),
+        "the pid of an ended process still reports the start time it had while \
+         alive, so the pid guard would adopt a process that no longer exists"
+    );
+    if cfg!(unix) {
+        assert_eq!(after, None, "a reaped pid leaves the process table");
+    }
+    assert_eq!(
+        reconcile::decide(
+            Some(pid as i64),
+            Some(first as i64),
+            after.map(|start_time| ObservedProcess { start_time })
+        ),
+        Reconciliation::Gone,
+        "an ended process is never still ours, whatever the pid now holds"
+    );
 }
