@@ -1262,8 +1262,22 @@ async fn the_map_opens_on_the_port_this_app_chose() {
 
         stdin.write_all(b"stop\n").await.unwrap();
         stdin.flush().await.unwrap();
-        while let Ok(Some(_)) = lines.next_line().await {}
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(240), child.wait()).await;
+        // Draining under a deadline, because this test drives the process
+        // directly and has none of the supervisor's escalation behind it: a
+        // server that does not stop would hang the whole run rather than fail
+        // it. A map mod is a web server and a render pool inside the same JVM,
+        // so a mapped server takes its time on the way down.
+        let drained = tokio::time::timeout(std::time::Duration::from_secs(180), async {
+            while let Ok(Some(_)) = lines.next_line().await {}
+        })
+        .await;
+        let exited = tokio::time::timeout(std::time::Duration::from_secs(120), child.wait()).await;
+        if drained.is_err() || exited.is_err() {
+            // Killing it keeps the next case's ports free. The assertions below
+            // are about the port, and they have their answers already.
+            println!("{server_type:?}: did not stop on its own; killing it");
+            let _ = child.kill().await;
+        }
 
         assert!(
             listening,
