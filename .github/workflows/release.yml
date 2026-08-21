@@ -74,11 +74,30 @@ jobs:
             exit 1
           }
 
-      # The gate from CI, repeated here: a tag must not ship something that
-      # would have failed a pull request.
+      # The whole gate from ci.yml, in the same order, before anything is
+      # bundled. It used to be `cargo test` alone, and that is exactly how
+      # v0.1.0 shipped from a commit whose clippy run was failing: the release
+      # never checked the things CI was failing on. A tag must not be able to
+      # publish what a pull request would have been refused for.
+      - name: Typecheck frontend
+        run: pnpm typecheck
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
       - name: Test backend
         working-directory: src-tauri
         run: cargo test
+
+      # `cargo test` is what regenerates these, so it has to run first. A
+      # binding that disagrees with its Rust type is a UI reading fields that
+      # are no longer there.
+      - name: Verify generated TypeScript bindings are current
+        run: git diff --exit-code src/lib/bindings
 
       - name: Build installers
         run: pnpm tauri build ${{ matrix.args }}
