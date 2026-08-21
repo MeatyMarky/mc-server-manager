@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Something is wrong with a server, not with the app
+    url: https://docs.papermc.io
+    about: >
+      Crashes inside a mod, plugin configuration, world corruption — those live
+      with the server software or the mod author. The app's job is to start it
+      and show you what it said.

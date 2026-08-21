@@ -1,0 +1,51 @@
+MIT License
+
+Copyright (c) 2026 Marky
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This application bundles third-party code. The dependency tree is 666 crates
+plus the npm packages listed in package.json, and every one of them is under a
+permissive licence — overwhelmingly MIT or Apache-2.0, which this licence is
+compatible with.
+
+Three groups are worth naming because they ask for something beyond the notice
+above:
+
+  * MPL-2.0 (attohttpc, cssparser, cssparser-macros, dtoa-short, option-ext,
+    selectors). File-level copyleft: these crates are used unmodified and are
+    linked, not altered, so the obligation is to say they are here and to point
+    at their sources, which their crates.io pages do. Modifying one of those
+    files would mean publishing that file's changes.
+
+  * Unicode-3.0 (icu_collections and the rest of the ICU4X crates, plus part of
+    unicode-ident). Requires the Unicode licence notice to travel with
+    distributions that include the data.
+
+  * Apache-2.0 crates require their NOTICE files, where present, to be carried
+    along. The Apache-2.0 text is at https://www.apache.org/licenses/LICENSE-2.0
+
+The application also downloads, at the user's request and onto their own
+machine, software this project does not distribute: Eclipse Temurin JDKs from
+Adoptium (GPLv2 with Classpath Exception), Minecraft server jars from Mojang
+(under Mojang's own EULA, which the user accepts per server), and mods and
+modpacks from Modrinth and CurseForge under their authors' licences. None of
+that is bundled here.

@@ -1,0 +1,21 @@
+name: Suggest something
+description: A thing the app should do, or should stop doing.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation, rather than the feature. "I run three servers and I
+        cannot tell which one is eating the memory" says more than "add a
+        process list".
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind
+      description: Optional. If you already know the shape of the answer, say so.
+    validations:
+      required: false

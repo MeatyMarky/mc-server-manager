@@ -1,0 +1,71 @@
+name: Something went wrong
+description: A server that will not start, a button that does nothing, a crash.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please attach a problem report.** In the app: the **?** button in the
+        top right, then **Report a problem**. It shows you everything it is
+        about to include *before* it writes the zip, so you can read it first.
+
+        It carries the app log, this app's view of your Java installs, the
+        server's console, and a startup self-check. That is usually the whole
+        answer, and without it most reports turn into a long guessing game.
+
+        Two things to know before you attach it: folder paths contain your
+        Windows or Linux user name, and a server console contains whatever
+        players typed in chat.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        I pressed Start on my 1.21.4 Paper server and it went back to Stopped
+        after about ten seconds. I expected it to reach "Done".
+    validations:
+      required: true
+
+  - type: input
+    id: report
+    attributes:
+      label: Problem report
+      description: >
+        Drag the zip into this box, or say why there is not one — "the app would
+        not open" is a perfectly good reason.
+      placeholder: msm-report-2026-08-21.zip
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: The About dialog shows it, with the commit it was built from.
+      placeholder: 0.1.0 (a1b2c3d)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux (.deb)
+        - Linux (AppImage)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: server
+    attributes:
+      label: The server it happened to
+      description: Type, Minecraft version, and the loader build if there is one.
+      placeholder: Fabric, 1.21.4, loader 0.16.9
+    validations:
+      required: false

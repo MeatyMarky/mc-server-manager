@@ -1,0 +1,66 @@
+name: Linux report
+description: Anything at all about running this on Linux — it works, or it does not.
+labels: ["linux", "untested-platform"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The Linux builds compile in CI and the code is written to be portable —
+        every path is a `PathBuf`, every executable name is chosen per platform —
+        but **nobody has run the app on Linux**. So a report saying "it started
+        and I made a server" is as useful here as a crash.
+
+        If something did go wrong, a problem report is the fastest way to an
+        answer: the **?** button in the top right, then **Report a problem**. It
+        shows you the contents before it writes the zip.
+
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: How did it go
+      options:
+        - It works
+        - It starts, but something is wrong
+        - It does not start at all
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      placeholder: Ubuntu 24.04, Fedora 41, Arch…
+    validations:
+      required: true
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Which build
+      options:
+        - .deb
+        - AppImage
+        - Built from source
+    validations:
+      required: true
+
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop and session
+      description: >
+        Worth knowing, because the window, the tray icon and the file dialogs
+        all come from there.
+      placeholder: GNOME 47 on Wayland
+    validations:
+      required: false
+
+  - type: textarea
+    id: detail
+    attributes:
+      label: What happened
+      description: >
+        If it works, what you managed to do. If it did not, what you saw —
+        including anything the terminal printed when you started it.
+    validations:
+      required: true

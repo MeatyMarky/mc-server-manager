@@ -8,3 +8,19 @@ src-tauri/gen/
 *.local
 .DS_Store
 Thumbs.db
+
+# Nothing the app writes at runtime belongs in the repository. None of this
+# lives here by default — the database and logs go to the OS app-data folder
+# and servers go wherever the user chose — but a stray copy made while
+# debugging must not be committable.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite.corrupt-backup-*
+*.log
+.msm/
+instances/
+
+# Problem reports carry folder paths with a user name in them, and console
+# history with player chat.
+msm-report-*.zip

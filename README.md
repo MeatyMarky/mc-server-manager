@@ -7,29 +7,43 @@ backups — for as many servers as you like, side by side.
 Windows and Linux are both first-class. Nothing is uploaded anywhere: every server, world
 and backup stays on your machine.
 
+## What it looks like
+
+| | |
+| --- | --- |
+| ![The instance list and console](docs/screenshots/instances.png) | ![Browsing mods](docs/screenshots/mods.png) |
+| Your servers down the side, the console live in the middle. | Mods and plugins from Modrinth and CurseForge, with the version actually chosen rather than guessed. |
+
+![The web map](docs/screenshots/map.png)
+
+The world in a browser, served by the server itself.
+
 ---
 
 ## For people who just want to run a server
 
-### 1. Install Java
+### 1. Java, which you may not have to install
 
-A Minecraft server is a Java program, so you need Java on the computer. If you are not sure
-whether you have it, install it anyway — having two copies causes no harm.
+A Minecraft server is a Java program, and which Java it needs depends on its Minecraft
+version: 26.x wants Java 25, 1.20.5 and later want 21, 1.17 and later want 17, and older
+servers want Java 8. The app works that out per server, finds every Java already on the
+computer, and offers to download the right one when nothing suitable is there — naming the
+version and the download size before it fetches anything.
+
+So you can skip this step. If you would rather install it yourself:
 
 - **Any platform:** [Adoptium Temurin](https://adoptium.net/temurin/releases/) — pick the
-  **JDK**, the newest **LTS** version (Java 21 or newer).
-- **Windows:** the `.msi` installer from Adoptium is the simplest route.
+  **JDK**, not the JRE.
 - **Debian / Ubuntu:** `sudo apt install openjdk-21-jdk`
 - **Fedora:** `sudo dnf install java-21-openjdk`
 
-Which Java a server needs depends on its Minecraft version, and the app works that out on
-its own. Java 21 covers current versions; older servers may want Java 17 or Java 8, and the
-app will say so if it needs one you do not have.
+One thing worth knowing: a 32-bit Java cannot run a server with more than about 1.5 GB of
+memory. The app will not choose one, and says why rather than letting the server fail.
 
 ### 2. Install the app
 
 Download the installer for your system from the
-[Releases page](https://github.com/your-org/mc-server-manager/releases):
+[Releases page](https://github.com/Marky/mc-server-manager/releases):
 
 | System | File | Notes |
 | --- | --- | --- |
@@ -76,6 +90,18 @@ The **Networking** tab answers this for your machine specifically:
 - A button that asks the router to forward the port over **UPnP**, and — for the many
   routers that will not — the manual steps, written out with your own router's address.
 - Whether the **whitelist** is on, and a button to turn it on while the server is stopped.
+
+### A map of your world
+
+Tick **Web map** when creating a server and it installs [squaremap](https://modrinth.com/mod/squaremap)
+alongside it: flat, vanilla-looking tiles you can pan around in a browser. It gets its own
+**Map** tab, on a port nothing else on the machine is using.
+
+Two things worth knowing. It draws the world as people explore and save it, so a new world
+looks mostly empty at first — the tab says so, and offers a button that renders what has
+already been played. And its web server listens on every address this computer has, so anyone
+who can reach the machine can see the map; the Networking tab lists exactly which addresses
+those are.
 
 **Players**, **Worlds**, **Config** and **Backups** each have their own tab. App-wide
 options — theme, the folder new servers go in, downloaded Java, the CurseForge key — are
