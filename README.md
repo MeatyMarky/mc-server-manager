@@ -11,13 +11,10 @@ and backup stays on your machine.
 
 | | |
 | --- | --- |
-| ![The console tab](docs/screenshots/console.png) | ![Browsing mods](docs/screenshots/mods.png) |
-| Every server gets the same tabs, and the console has search, autoscroll and copy. | Mods and plugins from Modrinth and CurseForge, filtered to what fits the server's own version. |
-
-![The web map](docs/screenshots/map.png)
-
-The world in a browser, served by the server itself — and it says out loud that it
-listens on `0.0.0.0`.
+| ![Creating a server](docs/screenshots/creation.png) | ![The console tab](docs/screenshots/console.png) |
+| A version is chosen from a table with release dates, not guessed from a dropdown of two hundred ids. | Every server gets the same tabs, and the console has search, autoscroll and copy. |
+| ![Browsing mods](docs/screenshots/mods.png) | ![The web map](docs/screenshots/map.png) |
+| Mods and plugins from Modrinth and CurseForge, filtered to what fits the server's own version. | The world in a browser, served by the server itself — saying out loud that it listens on `0.0.0.0`. |
 
 ---
 

@@ -1,9 +1,10 @@
 # Screenshots
 
-Three images, referenced from the project README, with these exact names.
+Four images, referenced from the project README, with these exact names.
 
 | File | What it shows |
 | --- | --- |
+| `creation.png` | The New server dialog: server type above the version table, the Releases/Snapshots/Pre-releases filters, and the release dates beside each version. |
 | `console.png` | The Console tab: the row of tabs every instance has, the search box, the line count, the autoscroll toggle and copy, and the command input along the bottom. |
 | `mods.png` | The Mods browser mid-search against Modrinth, cards with their icons, and the "only what fits this Minecraft version" filter switched on. |
 | `map.png` | The Map tab with squaremap rendered, the notice that the map listens on `0.0.0.0`, and the address it was given. |
