@@ -43,7 +43,7 @@ memory. The app will not choose one, and says why rather than letting the server
 ### 2. Install the app
 
 Download the installer for your system from the
-[Releases page](https://github.com/Marky/mc-server-manager/releases):
+[Releases page](https://github.com/MeatyMarky/mc-server-manager/releases):
 
 | System | File | Notes |
 | --- | --- | --- |
